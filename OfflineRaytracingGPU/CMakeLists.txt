@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchContent)
-set(NAME VulkanHelper)
+set(NAME OfflineRaytracingGPU)
 project(${NAME})
 
 if (NOT IS_DIRECTORY $ENV{VULKAN_SDK})

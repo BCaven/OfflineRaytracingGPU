@@ -2,6 +2,8 @@
 
 #include "VulkanHelper.h"
 #include "Utility.h"
+#include <variant>
+
 
 /*
 Function to make main not as wordy
@@ -19,7 +21,7 @@ TODO:
 
 constexpr uint32_t maxFramesInFlight{ 2 };
 constexpr uint32_t numHistoryFrames{ 2 };
-
+constexpr uint32_t objectTypes{ 1 };
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
 };
@@ -62,8 +64,6 @@ class VK_Wrap
 	std::array<ShaderDataBuffer, maxFramesInFlight> shaderDataBuffers;
 	std::array<Texture, 3> textures{};
 	Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-	glm::vec3 camPos{ 0.0f, 0.0f, -6.0f };
-	glm::vec3 objectRotations[3]{};
 	glm::ivec2 windowSize{};
 	ShaderData shaderData{};
 
@@ -88,15 +88,10 @@ class VK_Wrap
 	std::vector<VkDescriptorImageInfo> textureDescriptors{};
 
 
-	// TODO: going to need one of these per object type
-	VmaAllocationInfo sphereStagingAllocInfo{};
-	VkBufferCreateInfo sphereBufferInfo{};
-	VkBuffer sphereBuffer;		
-	VkBuffer sphereStagingBuffer;
-	VmaAllocation sphereAllocation;
-	VmaAllocation sphereStagingAllocation;
-	VkDescriptorSetLayout descriptorSetLayoutSpheres;
-	VkDescriptorPool sphereDescriptorPool;
+	VkDescriptorSetLayout descriptorSetLayout;
+	VkDescriptorPool descriptorPool;
+
+
 
 	// Frame history
 	std::array<VkImage, numHistoryFrames> historyImages{};
@@ -113,11 +108,11 @@ class VK_Wrap
 
 
 	// bindings
-	// TODO: having this be dynamic might be bad?
 	std::vector<VkDescriptorSetLayoutBinding> setBindings;
 
-
 	std::unordered_map<std::string, ResourceBinding> bindings;
+
+	std::unordered_map<std::string, StructuredBufferBinding> structuredBufferBindings{};
 
 
 	uint64_t lastTime{ SDL_GetTicks() };
@@ -158,7 +153,10 @@ class VK_Wrap
 public:
 
 	std::vector<Sphere> spheres;
+	std::vector<Material> materials;
 	CameraWrapper camera;
+
+
 
 	VK_Wrap() {};
 	~VK_Wrap() 
@@ -166,8 +164,11 @@ public:
 		// Tear down
 		chk(vkDeviceWaitIdle(device));
 
-		vmaDestroyBuffer(allocator, sphereStagingBuffer, sphereStagingAllocation);
-		vmaDestroyBuffer(allocator, sphereBuffer, sphereAllocation);
+		for (auto& [name, binding] : structuredBufferBindings)
+		{
+			vmaDestroyBuffer(allocator, binding.stagingBuffer, binding.stagingAllocation);
+			vmaDestroyBuffer(allocator, binding.buffer, binding.bufferAllocation);
+		}
 
 		// destroy history buffers
 		for (auto i = 0; i < historyImages.size(); i++)
@@ -179,8 +180,10 @@ public:
 		}
 		vkDestroySampler(device, historySampler, nullptr);
 
-		vkDestroyDescriptorSetLayout(device, descriptorSetLayoutSpheres, nullptr);
-		vkDestroyDescriptorPool(device, sphereDescriptorPool, nullptr);
+		
+
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
 		vmaDestroyBuffer(allocator, vBuffer, vBufferAllocation);
 
@@ -283,8 +286,10 @@ public:
 
 
 		initShaderCompiler();
-		
-		loadSpheres();
+
+		loadStructuredBuffer("spheres", spheres);
+
+		//loadStructuredBuffer("materials", materials);
 
 		initHistoryImages();
 
@@ -292,7 +297,15 @@ public:
 
 		initPipeline();
 
-		updateSphereDescriptors();
+		updateStructuredBufferDescriptors("spheres");
+
+		//updateStructuredBufferDescriptors("materials");
+
+
+		for (auto& [name, b] : bindings)
+		{
+			std::cout << name << " binding " << b.binding << " set " << b.set << '\n';
+		}
 
 		initVertices();
 
@@ -756,7 +769,7 @@ public:
 		VkPipelineLayoutCreateInfo pipelineLayoutCI{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 			.setLayoutCount = 1,
-			.pSetLayouts = &descriptorSetLayoutSpheres,
+			.pSetLayouts = &descriptorSetLayout,
 			.pushConstantRangeCount = 1,
 			.pPushConstantRanges = &pushConstantRange
 		};
@@ -786,48 +799,65 @@ public:
 			.bindingCount = static_cast<uint32_t>(setBindings.size()),
 			.pBindings = setBindings.data()
 		};
-		chk(vkCreateDescriptorSetLayout(device, &sphereSetLayoutCI, nullptr, &descriptorSetLayoutSpheres));
+		chk(vkCreateDescriptorSetLayout(device, &sphereSetLayoutCI, nullptr, &descriptorSetLayout));
 
 
-		std::array<VkDescriptorPoolSize, 2> poolSizes{
+		std::array<VkDescriptorPoolSize, objectTypes + 1> poolSizes{
 			VkDescriptorPoolSize{
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = maxFramesInFlight
-			},
+			},/*
+			VkDescriptorPoolSize{
+				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = maxFramesInFlight
+			},*/
 			VkDescriptorPoolSize{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				.descriptorCount = maxFramesInFlight
 			},
 		};
-		VkDescriptorPoolCreateInfo spherePoolCI{
+		VkDescriptorPoolCreateInfo poolCI{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.maxSets = maxFramesInFlight,
 			.poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
 			.pPoolSizes = poolSizes.data()
 		};
-		chk(vkCreateDescriptorPool(device, &spherePoolCI, nullptr, &sphereDescriptorPool));
+		chk(vkCreateDescriptorPool(device, &poolCI, nullptr, &descriptorPool));
 
 		std::array<VkDescriptorSetLayout, maxFramesInFlight> layouts;
-		layouts.fill(descriptorSetLayoutSpheres);
+		layouts.fill(descriptorSetLayout);
 
 		VkDescriptorSetAllocateInfo sphereSetAllocInfo{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-			.descriptorPool = sphereDescriptorPool,
+			.descriptorPool = descriptorPool,
 			.descriptorSetCount = maxFramesInFlight,
 			.pSetLayouts = layouts.data()
 		};
 		chk(vkAllocateDescriptorSets(device, &sphereSetAllocInfo, descriptorSets.data()));
 	}
 
-	void loadSpheres()
+	template<typename T>
+	void loadStructuredBuffer(std::string bindingName, std::vector<T> data)
 	{
-		// Upload Sphere list:
+		// check if a binding exists, if not return
+		if (structuredBufferBindings.find(bindingName) != structuredBufferBindings.end())
+		{
+			std::cout << "Bindings already exist for " << bindingName << "\n";
+			return;
+		}
+		if (bindings.find(bindingName) == bindings.end())
+		{
+			std::cout << "Binding does not exist in reflection for " << bindingName << "\n";
+			return;
+		}
+		
+		auto& binding = structuredBufferBindings[bindingName];
 
 		// Step 1: device-local buffer
 
-		sphereBufferInfo = VkBufferCreateInfo{
+		binding.bufferInfo = VkBufferCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-			.size = sizeof(Sphere) * spheres.size(),
+			.size = sizeof(T) * data.size(),
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE
 		};
@@ -835,24 +865,24 @@ public:
 			.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
 			.usage = VMA_MEMORY_USAGE_AUTO,
 		};
-		chk(vmaCreateBuffer(allocator, &sphereBufferInfo, &allocCreateInfo, &sphereBuffer, &sphereAllocation, nullptr));
+		chk(vmaCreateBuffer(allocator, &binding.bufferInfo, &allocCreateInfo, &binding.buffer, &binding.bufferAllocation, nullptr));
 
 		// step 2: Staging buffer
-		VkBufferCreateInfo sphereStagingInfo{
+		VkBufferCreateInfo stagingInfo{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-			.size = sphereBufferInfo.size,
+			.size = binding.bufferInfo.size,
 			.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE
 		};
-		VmaAllocationCreateInfo sphereStagingCreateInfo{
+		VmaAllocationCreateInfo stagingCreateInfo{
 			.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
 			.usage = VMA_MEMORY_USAGE_AUTO,
 		};
 
-		chk(vmaCreateBuffer(allocator, &sphereStagingInfo, &sphereStagingCreateInfo,
-			&sphereStagingBuffer, &sphereStagingAllocation, &sphereStagingAllocInfo));
+		chk(vmaCreateBuffer(allocator, &stagingInfo, &stagingCreateInfo,
+			&binding.stagingBuffer, &binding.stagingAllocation, &binding.stagingAllocInfo));
 
-		memcpy(sphereStagingAllocInfo.pMappedData, spheres.data(), (size_t)sphereBufferInfo.size);
+		memcpy(binding.stagingAllocInfo.pMappedData, data.data(), (size_t)binding.bufferInfo.size);
 
 		VkCommandBufferAllocateInfo oneTimeAllocInfo{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -867,32 +897,32 @@ public:
 		VkFence fenceOneTime{};
 		chk(vkCreateFence(device, &fenceOneTimeCI, nullptr, &fenceOneTime));
 		beginSingleTimeCommands(cbOneTime, fenceOneTime);
-		VkBufferCopy sphereCopyRegion{
-			.size = sphereBufferInfo.size
+		VkBufferCopy copyRegion{
+			.size = binding.bufferInfo.size
 		};
-		vkCmdCopyBuffer(cbOneTime, sphereStagingBuffer, sphereBuffer, 1, &sphereCopyRegion);
-		VkBufferMemoryBarrier2 sphereBarrier{
+		vkCmdCopyBuffer(cbOneTime, binding.stagingBuffer, binding.buffer, 1, &copyRegion);
+		VkBufferMemoryBarrier2 barrier{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
 			.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
 			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
 			.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 			.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
-			.buffer = sphereBuffer,
+			.buffer = binding.buffer,
 			.size = VK_WHOLE_SIZE
 		};
-		VkDependencyInfo sphereBarrierInfo{
+		VkDependencyInfo barrierInfo{
 			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 			.bufferMemoryBarrierCount = 1,
-			.pBufferMemoryBarriers = &sphereBarrier
+			.pBufferMemoryBarriers = &barrier
 		};
 
-		vkCmdPipelineBarrier2(cbOneTime, &sphereBarrierInfo);
+		vkCmdPipelineBarrier2(cbOneTime, &barrierInfo);
 		endSingleTimeCommands(cbOneTime, fenceOneTime);
 
 		// step 3: descriptor set layout using reflected binding index
 		setBindings.push_back(
 			VkDescriptorSetLayoutBinding{
-				.binding = bindings["spheres"].binding,
+				.binding = bindings[bindingName].binding,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
@@ -903,26 +933,39 @@ public:
 		vkFreeCommandBuffers(device, commandPool, 1, &cbOneTime);
 	}
 
-	void updateSphereDescriptors()
+	void updateStructuredBufferDescriptors(std::string bindingName)
 	{
-		// TODO: I dont know if this part has to happen after the bindings are updated or if it doesnt matter.
-		// If it breaks, move this to a separate function
-		// step 5: write descriptor and point at sphereBuffer
-		VkDescriptorBufferInfo sphereDescBufInfo{
-			.buffer = sphereBuffer,
+		// TODO: could have a function that updates all descriptors
+
+		// check if a binding exists, if not return
+		if (structuredBufferBindings.find(bindingName) == structuredBufferBindings.end())
+		{
+			std::cout << "Bindings do not exist for " << bindingName << "\n";
+			return;
+		}
+		if (bindings.find(bindingName) == bindings.end())
+		{
+			std::cout << "Binding does not exist in reflection for " << bindingName << "\n";
+			return;
+		}
+
+		auto& binding = structuredBufferBindings[bindingName];
+
+		VkDescriptorBufferInfo descBufInfo{
+			.buffer = binding.buffer, //sphereBuffer,
 			.range = VK_WHOLE_SIZE
 		};
 		for (auto i = 0; i < maxFramesInFlight; i++)
 		{
-			VkWriteDescriptorSet sphereWrite{
+			VkWriteDescriptorSet write{
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 				.dstSet = descriptorSets[i],
-				.dstBinding = bindings["spheres"].binding,
+				.dstBinding = bindings[bindingName].binding,
 				.descriptorCount = 1,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.pBufferInfo = &sphereDescBufInfo
+				.pBufferInfo = &descBufInfo
 			};
-			vkUpdateDescriptorSets(device, 1, &sphereWrite, 0, nullptr);
+			vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 
 		}
 	}
@@ -1215,7 +1258,6 @@ public:
 			if (event.type == SDL_EVENT_MOUSE_WHEEL) {
 				camera.origin += camera.direction * (float)event.wheel.y * elapsedTime * 10.0f;
 				shaderData.frameCount = 0;
-				//camPos.z += (float)event.wheel.y * elapsedTime * 10.0f;
 			}
 			if (event.type == SDL_EVENT_KEY_DOWN) {
 				
@@ -1246,7 +1288,17 @@ public:
 			chk(vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapchainImages.data()));
 			swapchainImageViews.resize(imageCount);
 			for (auto i = 0; i < imageCount; i++) {
-				VkImageViewCreateInfo viewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = swapchainImages[i], .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = imageFormat, .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1} };
+				VkImageViewCreateInfo viewCI{ 
+					.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 
+					.image = swapchainImages[i], 
+					.viewType = VK_IMAGE_VIEW_TYPE_2D, 
+					.format = imageFormat, 
+					.subresourceRange = {
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, 
+						.levelCount = 1, 
+						.layerCount = 1
+					} 
+				};
 				chk(vkCreateImageView(device, &viewCI, nullptr, &swapchainImageViews[i]));
 			}
 			for (auto& semaphore : renderCompleteSemaphores) {

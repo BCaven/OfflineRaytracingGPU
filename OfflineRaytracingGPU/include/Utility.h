@@ -16,11 +16,17 @@ struct Camera
 	glm::vec3 origin;
 };
 
+struct Material
+{
+	glm::vec4 color;
+
+};
+
 struct Sphere
 {
 	glm::vec3 center;
 	float radius;
-	glm::vec4 color = glm::vec4(1.0);
+	unsigned int materialIndex;
 };
 struct ShaderData 
 {
@@ -49,10 +55,23 @@ struct Vertex
 	glm::vec3 pos;
 };
 
-struct ResourceBinding { 
+struct ResourceBinding 
+{ 
 	uint32_t binding; 
 	uint32_t set; 
 };
+struct StructuredBufferBinding
+{
+	VmaAllocationInfo stagingAllocInfo;
+	VkBufferCreateInfo bufferInfo;
+	VkBuffer buffer;
+	VkBuffer stagingBuffer;
+	VmaAllocation bufferAllocation;
+	VmaAllocation stagingAllocation;
+	VkDescriptorSetLayout descriptorSetLayout;
+	VkDescriptorPool descriptorPool;
+};
+
 
 
 static inline void chk(VkResult result) 

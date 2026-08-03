@@ -63,11 +63,11 @@ struct Scatter
     float4 attenuation;
     Ray ray;
 };
-Scatter scatter(Ray input_ray, Intersection hit)
+Scatter scatter(Ray input_ray, Intersection hit, Material material)
 {
     float3 scattered = reflect(input_ray.direction, hit.normal);
-    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered);
-    float4 attenuation = hit.color;
+    Ray outputRay = Ray(point_on_ray(input_ray, hit.t) + hit.normal + EPSILON, scattered);
+    float4 attenuation = material.color;
     return Scatter(attenuation, outputRay);
 };
 
@@ -85,16 +85,23 @@ struct Intersection
 {
     float3 normal;
     float t;
-    float4 color;
+    uint materialIndex;
 };
 Intersection no_intersection()
 {
-    return Intersection(float3(0), -1, float4(0));
+    return Intersection(float3(0), -1, 0);
 };
 bool valid_intersection(Intersection hit)
 {
     return hit.t > 0 && hit.t != FLT_MAX;
 }
+
+// Materials
+struct Material
+{
+    float4 color;
+
+};
 
 // Primitives
 
@@ -102,7 +109,7 @@ struct Sphere
 {
     float3 center;
     float radius;
-    float4 color;
+    uint materialIndex;
 };
 
 // Intersection algorithms
@@ -143,7 +150,7 @@ Intersection intersect_sphere(Ray ray, Sphere sphere)
     }
     float3 p = point_on_ray(ray, t);
     float3 N = (p - sphere.center) / sphere.radius;
-    return Intersection(N, t, sphere.color);
+    return Intersection(N, t, sphere.materialIndex);
 };
 
 
@@ -158,6 +165,7 @@ struct ShaderData
 };
 
 StructuredBuffer<Sphere> spheres;
+//StructuredBuffer<Material> materials;
 
 // accumulation of previous samples
 Sampler2D previousFrame;
@@ -221,7 +229,8 @@ float4 main(VSOutput input)
             radianceSample += throughput * sky_color(ray);
             break;
         }
-        Scatter scattered = scatter(ray, intersection);
+        Material material = Material(float4(0, 1, 1, 1)); //materials[intersection.materialIndex];
+        Scatter scattered = scatter(ray, intersection, material);
         throughput *= scattered.attenuation;
         ray = scattered.ray;
         pathLength += 1;
