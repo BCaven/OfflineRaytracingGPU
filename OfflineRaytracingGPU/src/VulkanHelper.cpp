@@ -20,14 +20,18 @@ int main()
 	VK_Wrap wrapper;
 
 	wrapper.spheres = {
-		Sphere{glm::vec3(-1, 0, -1), 0.5, 0},
 		Sphere{glm::vec3(0, 0, -1), 0.5, 0},
-		Sphere{glm::vec3(1, 0, -1), 0.5, 0},
-		Sphere(glm::vec3(0, -1002, 0), 1000, 0),
+		Sphere{glm::vec3(-1.5, 0, -1), 0.5, 1},
+		Sphere{glm::vec3(1, 0, -1), 0.5, 2},
+		Sphere(glm::vec3(0, -1001, 0), 1000, 3),
 	};
 
 	wrapper.materials = std::vector<Material>{
-			Material{ glm::vec4(0, 1, 0, 1) }
+			Material{ glm::vec4(1, 1, 1, 1), 1, 0 },
+			Material{ glm::vec4(1, 1, 1, 1), 0, 1.5 },
+			Material{ glm::vec4(0, 0, 1, 1), 0, 0 },
+			Material{ glm::vec4(0, 1, 0, 1), 0, 0 }
+
 	};
 
 	wrapper.camera = CameraWrapper{

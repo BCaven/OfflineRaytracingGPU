@@ -5,6 +5,7 @@
 static const float FLT_MAX = 3.40282346638528859812e+38;
 static const float EPSILON = 1e-3;
 static const uint MAX_PATH_LENGTH = 20;
+static const float TWO_PI = 6.2831853;
 
 struct VSInput 
 {
@@ -56,6 +57,16 @@ float rand_float()
     return bit_cast<float>(0x3f800000u | (xorshift() >> 9u)) - 1.0;
 }
 
+float3 sample_sphere()
+{
+    float r0 = rand_float();
+    float r1 = rand_float();
+    float y = 1 - (2 * r0);
+    float xz_r = sqrt(1 - y * y);
+    float phi = TWO_PI * r1;
+    return float3(xz_r * cos(phi), y, xz_r * sin(phi));
+}
+
 // Raytracing items
 
 struct Scatter 
@@ -63,10 +74,44 @@ struct Scatter
     float4 attenuation;
     Ray ray;
 };
+float3 sample_lamberian(float3 normal)
+{
+    return normal + sample_sphere() * (1 - EPSILON);
+}
+
 Scatter scatter(Ray input_ray, Intersection hit, Material material)
 {
-    float3 scattered = reflect(input_ray.direction, hit.normal);
-    Ray outputRay = Ray(point_on_ray(input_ray, hit.t) + hit.normal + EPSILON, scattered);
+    float3 incident = normalize(input_ray.direction);
+    float incident_dot_normal = dot(incident, hit.normal);
+    bool is_front_face = incident_dot_normal < 0;
+    float3 N = select(is_front_face, hit.normal, -hit.normal);
+    float cos_theta = abs(incident_dot_normal);
+
+    float3 scattered = float3(0);
+    if (material.ior > 0)
+    {
+        float ior = material.ior;
+        float ref_ratio = select(is_front_face, 1 / ior, ior);
+        bool cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1;
+        if (cannot_refract)
+        {
+            scattered = reflect(incident, N);
+        }
+        else
+        {
+            scattered = refract(incident, N, ref_ratio);
+        }
+    } 
+    else if (material.specular == 1)
+    {
+        scattered = reflect(incident, N);
+    } 
+    else 
+    {
+        scattered = sample_lamberian(N);
+    }
+
+    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered);
     float4 attenuation = material.color;
     return Scatter(attenuation, outputRay);
 };
@@ -100,7 +145,8 @@ bool valid_intersection(Intersection hit)
 struct Material
 {
     float4 color;
-
+    float specular;
+    float ior;
 };
 
 // Primitives
@@ -165,7 +211,7 @@ struct ShaderData
 };
 
 StructuredBuffer<Sphere> spheres;
-//StructuredBuffer<Material> materials;
+StructuredBuffer<Material> materials;
 
 // accumulation of previous samples
 Sampler2D previousFrame;
@@ -229,15 +275,13 @@ float4 main(VSOutput input)
             radianceSample += throughput * sky_color(ray);
             break;
         }
-        Material material = Material(float4(0, 1, 1, 1)); //materials[intersection.materialIndex];
+        Material material = materials[intersection.materialIndex];
         Scatter scattered = scatter(ray, intersection, material);
         throughput *= scattered.attenuation;
         ray = scattered.ray;
         pathLength += 1;
     }
     
-    //float4 currentColor = intersection.t < FLT_MAX ? float4(0.5 * intersection.normal + float3(0.5), 1.0) : sky_color(ray);
-
     // TODO remove this redundant calc
     uv = input.Pos.xy / input.windowMax;
     float4 historyColor = previousFrame.Sample(uv);

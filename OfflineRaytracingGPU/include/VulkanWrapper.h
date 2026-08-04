@@ -2,26 +2,10 @@
 
 #include "VulkanHelper.h"
 #include "Utility.h"
-#include <variant>
-
-
-/*
-Function to make main not as wordy
-
-TODO:
-[X] Init Vulkan
-[X] Load Shader
-[ ] Primitives representation
-[X] Rays in the frag shader >:D
-[ ] 
-
-
-
-*/
 
 constexpr uint32_t maxFramesInFlight{ 2 };
 constexpr uint32_t numHistoryFrames{ 2 };
-constexpr uint32_t objectTypes{ 1 };
+constexpr uint32_t objectTypes{ 2 };
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
 };
@@ -289,7 +273,7 @@ public:
 
 		loadStructuredBuffer("spheres", spheres);
 
-		//loadStructuredBuffer("materials", materials);
+		loadStructuredBuffer("materials", materials);
 
 		initHistoryImages();
 
@@ -299,7 +283,7 @@ public:
 
 		updateStructuredBufferDescriptors("spheres");
 
-		//updateStructuredBufferDescriptors("materials");
+		updateStructuredBufferDescriptors("materials");
 
 
 		for (auto& [name, b] : bindings)
@@ -707,7 +691,8 @@ public:
 			std::to_array<slang::TargetDesc>({
 				{
 					.format{SLANG_SPIRV},
-					.profile{slangGlobalSession->findProfile("spirv_1_4")}
+					.profile{slangGlobalSession->findProfile("spirv_1_4")},
+					.forceGLSLScalarBufferLayout = true,
 				}
 				})
 		};
@@ -806,11 +791,11 @@ public:
 			VkDescriptorPoolSize{
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = maxFramesInFlight
-			},/*
+			},
 			VkDescriptorPoolSize{
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = maxFramesInFlight
-			},*/
+			},
 			VkDescriptorPoolSize{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				.descriptorCount = maxFramesInFlight

@@ -9,6 +9,7 @@ struct CameraWrapper
 	glm::vec3 up = glm::vec3(0, 1, 0);
 };
 
+// TODO later: make sure the strides of all Vulkan and Slang data structures match and best fit the blocks
 
 struct Camera
 {
@@ -19,7 +20,8 @@ struct Camera
 struct Material
 {
 	glm::vec4 color;
-
+	float specular;
+	float ior;
 };
 
 struct Sphere
