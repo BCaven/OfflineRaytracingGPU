@@ -2,10 +2,12 @@
 
 #include "VulkanHelper.h"
 #include "Utility.h"
+#include "KeyInputs.h"
 
 constexpr uint32_t maxFramesInFlight{ 2 };
 constexpr uint32_t numHistoryFrames{ 2 };
 constexpr uint32_t objectTypes{ 2 };
+constexpr glm::vec3 WORLD_UP{ 0, 1, 0 };
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
 };
@@ -49,7 +51,6 @@ class VK_Wrap
 	std::array<Texture, 3> textures{};
 	Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
 	glm::ivec2 windowSize{};
-	ShaderData shaderData{};
 
 	VkDeviceSize indexCount{};
 
@@ -98,6 +99,7 @@ class VK_Wrap
 
 	std::unordered_map<std::string, StructuredBufferBinding> structuredBufferBindings{};
 
+	KeyInputs& inputs = KeyInputs::inputHandler();
 
 	uint64_t lastTime{ SDL_GetTicks() };
 	bool quit{ false };
@@ -139,6 +141,8 @@ public:
 	std::vector<Sphere> spheres;
 	std::vector<Material> materials;
 	CameraWrapper camera;
+	ShaderData shaderData{};
+
 
 
 
@@ -152,19 +156,9 @@ public:
 		{
 			vmaDestroyBuffer(allocator, binding.stagingBuffer, binding.stagingAllocation);
 			vmaDestroyBuffer(allocator, binding.buffer, binding.bufferAllocation);
-		}
+		}		
 
-		// destroy history buffers
-		for (auto i = 0; i < historyImages.size(); i++)
-		{
-			auto historyImage = historyImages[i];
-			auto historyImageAllocation = historyImageAllocations[i];
-			vmaDestroyImage(allocator, historyImage, historyImageAllocation);
-			vkDestroyImageView(device, historyImageViews[i], nullptr);
-		}
-		vkDestroySampler(device, historySampler, nullptr);
-
-		
+		destroyHistoryImages();
 
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -399,6 +393,8 @@ public:
 		assert(window);
 		chk(SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface));
 		chk(SDL_GetWindowSize(window, &windowSize.x, &windowSize.y));
+		// relative mouse mode
+		chk(SDL_SetWindowRelativeMouseMode(window, true));
 		chk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(devices[deviceIndex], surface, &surfaceCaps));
 		VkExtent2D swapchainExtent{ surfaceCaps.currentExtent };
 		if (surfaceCaps.currentExtent.width == 0xFFFFFFFF) {
@@ -541,6 +537,19 @@ public:
 			.pImageInfo = &historyInfo
 		};
 		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+	}
+
+	void destroyHistoryImages()
+	{
+		// destroy history buffers
+		for (auto i = 0; i < historyImages.size(); i++)
+		{
+			auto historyImage = historyImages[i];
+			auto historyImageAllocation = historyImageAllocations[i];
+			vmaDestroyImage(allocator, historyImage, historyImageAllocation);
+			vkDestroyImageView(device, historyImageViews[i], nullptr);
+		}
+		vkDestroySampler(device, historySampler, nullptr);
 	}
 
 	void initVertices()
@@ -1000,9 +1009,13 @@ public:
 		chk(vkResetFences(device, 1, &fences[frameIndex]));
 		chkSwapchain(vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAcquiredSemaphores[frameIndex], VK_NULL_HANDLE, &imageIndex));
 		
-		shaderData.camera.lookAtMatrix = glm::lookAt(camera.origin, camera.origin - camera.direction, camera.up);
+		shaderData.camera.rotationMatrix = glm::mat3x3(
+			camera.right,
+			camera.up,
+			camera.direction
+		);
 		shaderData.camera.origin = camera.origin;
-
+		shaderData.camera.fov = camera.fov;
 		shaderData.frameCount += 1;
 		memcpy(shaderDataBuffers[frameIndex].allocationInfo.pMappedData, &shaderData, sizeof(ShaderData));
 
@@ -1043,7 +1056,6 @@ public:
 				}
 			}
 		};
-
 
 		// Build command buffer
 		auto cb = commandBuffers[frameIndex];
@@ -1230,27 +1242,73 @@ public:
 		// Event polling
 		float elapsedTime{ (SDL_GetTicks() - lastTime) / 1000.0f };
 		lastTime = SDL_GetTicks();
-		for (SDL_Event event; SDL_PollEvent(&event);) {
-			if (event.type == SDL_EVENT_QUIT) {
-				quit = true;
-				break;
-			}
-			if (event.type == SDL_EVENT_MOUSE_MOTION) {
-				if (event.button.button == SDL_BUTTON_LEFT) {
-					
-				}
-			}
-			if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-				camera.origin += camera.direction * (float)event.wheel.y * elapsedTime * 10.0f;
-				shaderData.frameCount = 0;
-			}
-			if (event.type == SDL_EVENT_KEY_DOWN) {
-				
-			}
-			// Window resize
-			if (event.type == SDL_EVENT_WINDOW_RESIZED) {
-				updateSwapchain = true;
-			}
+
+		inputs.handleKeyInputs();
+		quit = KeyInputs::QUIT;
+		bool camMoved = false;
+		if (KeyInputs::MOUSE_DELTA_X != 0 || KeyInputs::MOUSE_DELTA_Y != 0)
+		{
+			float pitchDelta = -KeyInputs::MOUSE_DELTA_Y * elapsedTime * KeyInputs::MOUSE_SENSITIVITY;
+			float yawDelta = KeyInputs::MOUSE_DELTA_X * elapsedTime * KeyInputs::MOUSE_SENSITIVITY;
+
+			camera.pitch += pitchDelta;
+			camera.pitch = std::clamp(camera.pitch, -89.f, 89.f);
+			camera.yaw += yawDelta;
+			float yawRad = glm::radians(camera.yaw);
+			float pitchRad = glm::radians(camera.pitch);
+
+			glm::vec3 direction;
+
+			direction.x = std::cos(pitchRad) * std::cos(yawRad);
+			direction.y = std::sin(pitchRad);
+			direction.z = std::cos(pitchRad) * std::sin(yawRad);
+			camera.direction = glm::normalize(direction);
+			camera.right = glm::normalize(glm::cross(camera.direction, WORLD_UP));
+			camera.up = glm::cross(camera.right, camera.direction);
+
+			camMoved = true;
+		}
+		if (KeyInputs::MOUSE_WHEEL)
+		{
+			camera.fov -= (float)KeyInputs::MOUSE_WHEEL * elapsedTime * 50.f;
+			camera.fov = std::clamp(camera.fov, 1.f, 179.f);
+			camMoved = true;
+		}
+		if (KeyInputs::FORWARD)
+		{
+			camera.origin += camera.direction * elapsedTime;
+			camMoved = true;
+		}
+		if (KeyInputs::BACKWARD)
+		{
+			camera.origin -= camera.direction * elapsedTime;
+			camMoved = true;
+		}
+		if (KeyInputs::LEFT)
+		{
+			camera.origin -= camera.right * elapsedTime;
+			camMoved = true;
+		}
+		if (KeyInputs::RIGHT)
+		{
+			camera.origin += camera.right * elapsedTime;
+			camMoved = true;
+		}
+		if (KeyInputs::UP)
+		{
+			camera.origin += camera.up * elapsedTime;
+			camMoved = true;
+		}
+		if (KeyInputs::DOWN)
+		{
+			camera.origin -= camera.up * elapsedTime;
+			camMoved = true;
+		}
+
+		updateSwapchain = KeyInputs::WINDOW_RESIZED;
+		if (camMoved)
+		{
+			shaderData.frameCount = 0;
 		}
 
 		// update history read index
@@ -1286,6 +1344,10 @@ public:
 				};
 				chk(vkCreateImageView(device, &viewCI, nullptr, &swapchainImageViews[i]));
 			}
+
+			destroyHistoryImages();
+			initHistoryImages();
+
 			for (auto& semaphore : renderCompleteSemaphores) {
 				vkDestroySemaphore(device, semaphore, nullptr);
 			}
