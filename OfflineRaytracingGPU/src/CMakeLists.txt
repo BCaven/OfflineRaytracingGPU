@@ -2,7 +2,7 @@ add_executable(${NAME}
     VulkanHelper.cpp
     EngineObject.cpp
     KeyInputs.cpp
-    ${CMAKE_SOURCE_DIR}/assets/shader.slang)
+    ${CMAKE_SOURCE_DIR}/shaders/shader.slang)
 
 target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include

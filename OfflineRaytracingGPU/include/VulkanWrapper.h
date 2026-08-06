@@ -6,7 +6,7 @@
 
 constexpr uint32_t maxFramesInFlight{ 2 };
 constexpr uint32_t numHistoryFrames{ 2 };
-constexpr uint32_t objectTypes{ 2 };
+constexpr uint32_t objectTypes{ 4 };
 constexpr glm::vec3 WORLD_UP{ 0, 1, 0 };
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -139,6 +139,8 @@ class VK_Wrap
 public:
 
 	std::vector<Sphere> spheres;
+	std::vector<Triangle> triangles;
+	std::vector<bvhNode> bvhNodes;
 	std::vector<Material> materials;
 	CameraWrapper camera;
 	ShaderData shaderData{};
@@ -205,7 +207,6 @@ public:
 
 		initSwapchain();
 		
-		
 		// Shader data buffers
 		for (auto i = 0; i < maxFramesInFlight; i++) {
 			VkBufferCreateInfo uBufferCI{ 
@@ -262,12 +263,15 @@ public:
 		};
 		chk(vkAllocateCommandBuffers(device, &cbAllocCI, commandBuffers.data()));
 
-
 		initShaderCompiler();
 
 		loadStructuredBuffer("spheres", spheres);
 
+		loadStructuredBuffer("triangles", triangles);
+
 		loadStructuredBuffer("materials", materials);
+
+		loadStructuredBuffer("bvhNodes", bvhNodes);
 
 		initHistoryImages();
 
@@ -277,7 +281,11 @@ public:
 
 		updateStructuredBufferDescriptors("spheres");
 
+		updateStructuredBufferDescriptors("triangles");
+
 		updateStructuredBufferDescriptors("materials");
+		
+		updateStructuredBufferDescriptors("bvhNodes");
 
 
 		for (auto& [name, b] : bindings)
@@ -287,9 +295,7 @@ public:
 
 		initVertices();
 
-		initShaderData();
-
-		
+		initShaderData();	
 	}
 
 	void initVulkan()
@@ -362,7 +368,10 @@ public:
 			.synchronization2 = true, 
 			.dynamicRendering = true 
 		};
-		VkPhysicalDeviceFeatures enabledVk10Features{ .samplerAnisotropy = VK_TRUE };
+		VkPhysicalDeviceFeatures enabledVk10Features{ 
+			.samplerAnisotropy = VK_TRUE,
+			.shaderInt64 = VK_TRUE
+		};
 		const std::vector<const char*> deviceExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 		VkDeviceCreateInfo deviceCI{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -458,6 +467,7 @@ public:
 	{
 		shaderData.windowMax = windowSize;
 		shaderData.numSpheres = spheres.size();
+		shaderData.numTris = triangles.size();
 		shaderData.frameCount = 0;
 	}
 
@@ -706,29 +716,85 @@ public:
 				})
 		};
 		auto slangOptions{
-			std::to_array<slang::CompilerOptionEntry>({ { slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1} } })
+			std::to_array<slang::CompilerOptionEntry>({ 
+				{ 
+					slang::CompilerOptionName::EmitSpirvDirectly, 
+					{slang::CompilerOptionValueKind::Int, 1} } 
+				})
+		};
+		const char* searchPaths[] = {
+			"shaders"
 		};
 		slang::SessionDesc slangSessionDesc{
 			.targets{slangTargets.data()},
 			.targetCount{SlangInt(slangTargets.size())},
 			.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
+			.searchPaths = searchPaths,
+			.searchPathCount = 1,
 			.compilerOptionEntries{slangOptions.data()},
 			.compilerOptionEntryCount{uint32_t(slangOptions.size())}
 		};
+		Slang::ComPtr<ISlangBlob> diagnostics;
+
 		// Load shader
 		Slang::ComPtr<slang::ISession> slangSession;
 		slangGlobalSession->createSession(slangSessionDesc, slangSession.writeRef());
 		Slang::ComPtr<slang::IModule> slangModule{
-			slangSession->loadModuleFromSource("triangle", "assets/shader.slang", nullptr, nullptr)
+			slangSession->loadModuleFromSource("triangle", "shaders/shader.slang", nullptr, diagnostics.writeRef())
 		};
+		if (diagnostics && diagnostics->getBufferSize() > 0)
+		{
+			std::cerr << (const char*)diagnostics->getBufferPointer() << "\n";
+		}
+
+		if (!slangModule)
+		{
+			std::cout << "Failed to load shaders/shader.slang\n";
+			exit(-1);
+		}
+
+
+
+		// Get all the shaders actually used
+		int entryPointCount = (int)slangModule->getDefinedEntryPointCount();
+		std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints(entryPointCount);
+		std::vector<slang::IComponentType*> componentsToLink;
+		componentsToLink.push_back(slangModule);
+		for (int i =0; i < entryPointCount; i++)
+		{
+			slangModule->getDefinedEntryPoint(i, entryPoints[i].writeRef());
+			componentsToLink.push_back(entryPoints[i]);
+		}
+
+		Slang::ComPtr<slang::IComponentType> composedProgram;
+		SlangResult composeResult = slangSession->createCompositeComponentType(
+			componentsToLink.data(), (SlangInt)componentsToLink.size(),
+			composedProgram.writeRef(), diagnostics.writeRef()
+		);
+		if (diagnostics && diagnostics->getBufferSize() > 0)
+		{
+			std::cerr << (const char*)diagnostics->getBufferPointer() << "\n";
+		}
+		chk(SLANG_SUCCEEDED(composeResult));
+
+
+		Slang::ComPtr<slang::IComponentType> linkedProgram;
+		SlangResult linkResult = composedProgram->link(linkedProgram.writeRef(), diagnostics.writeRef());
+		if (diagnostics && diagnostics->getBufferSize() > 0)
+		{
+			std::cerr << (const char*)diagnostics->getBufferPointer() << "\n";
+		}
+		chk(SLANG_SUCCEEDED(linkResult));
+
+
 
 		// get reflection indices
-		Slang::ComPtr<ISlangBlob> reflectionDiagnostics;
-		slang::ProgramLayout* programLayout = slangModule->getLayout(0, reflectionDiagnostics.writeRef());
-		if (reflectionDiagnostics && reflectionDiagnostics->getBufferSize() > 0)
+		slang::ProgramLayout* programLayout = linkedProgram->getLayout(0, diagnostics.writeRef());
+		if (diagnostics && diagnostics->getBufferSize() > 0)
 		{
-
-		};
+			std::cerr << (const char*)diagnostics->getBufferPointer() << "\n";
+		}
+		
 
 		unsigned paramCount = programLayout->getParameterCount();
 		for (unsigned i = 0; i < paramCount; i++)
@@ -743,13 +809,18 @@ public:
 
 
 		Slang::ComPtr<ISlangBlob> spirv;
-		slangModule->getTargetCode(0, spirv.writeRef());
+		linkedProgram->getTargetCode(0, spirv.writeRef(), diagnostics.writeRef());
+		if (diagnostics && diagnostics->getBufferSize() > 0)
+		{
+			std::cerr << (const char*)diagnostics->getBufferPointer() << "\n";
+		}
 		VkShaderModuleCreateInfo shaderModuleCI{
 			.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 			.codeSize = spirv->getBufferSize(),
 			.pCode = (uint32_t*)spirv->getBufferPointer()
 		};
 		chk(vkCreateShaderModule(device, &shaderModuleCI, nullptr, &shaderModule));
+
 
 	}
 
@@ -796,19 +867,17 @@ public:
 		chk(vkCreateDescriptorSetLayout(device, &sphereSetLayoutCI, nullptr, &descriptorSetLayout));
 
 
-		std::array<VkDescriptorPoolSize, objectTypes + 1> poolSizes{
-			VkDescriptorPoolSize{
+		std::array<VkDescriptorPoolSize, objectTypes + 1> poolSizes{};
+		for (int i = 0; i < objectTypes; i++)
+		{
+			poolSizes[i] = VkDescriptorPoolSize{
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = maxFramesInFlight
-			},
-			VkDescriptorPoolSize{
-				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = maxFramesInFlight
-			},
-			VkDescriptorPoolSize{
+			};
+		}
+		poolSizes[objectTypes] = VkDescriptorPoolSize{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				.descriptorCount = maxFramesInFlight
-			},
 		};
 		VkDescriptorPoolCreateInfo poolCI{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -964,7 +1033,7 @@ public:
 		}
 	}
 
-	bool loadObj(std::string filepath)
+	bool loadObj(std::string filepath, unsigned int materialIndex)
 	{
 		// TODO: separate mesh data :)
 		// Mesh data
@@ -974,31 +1043,39 @@ public:
 		chk(tinyobj::LoadObj(&attrib, &shapes, &materials, nullptr, nullptr, filepath.c_str()));
 		indexCount = VkDeviceSize{ shapes[0].mesh.indices.size() };
 		std::vector<Vertex> vertices{};
-		std::vector<uint16_t> indices{};
 		// Load vertex and index data
 		for (auto& index : shapes[0].mesh.indices) {
 			Vertex v{
-				.pos = { attrib.vertices[index.vertex_index * 3], -attrib.vertices[index.vertex_index * 3 + 1], attrib.vertices[index.vertex_index * 3 + 2] },
-				//.normal = { attrib.normals[index.normal_index * 3], -attrib.normals[index.normal_index * 3 + 1], attrib.normals[index.normal_index * 3 + 2] },
+				.pos = { attrib.vertices[index.vertex_index * 3], attrib.vertices[index.vertex_index * 3 + 1], attrib.vertices[index.vertex_index * 3 + 2] },
+				//.normal = { attrib.normals[index.normal_index * 3], attrib.normals[index.normal_index * 3 + 1], attrib.normals[index.normal_index * 3 + 2] },
 				//.uv = { attrib.texcoords[index.texcoord_index * 2], 1.0 - attrib.texcoords[index.texcoord_index * 2 + 1] }
 			};
 			vertices.push_back(v);
-			indices.push_back(indices.size());
 		}
-		//vBufSize = VkDeviceSize{ sizeof(Vertex) * vertices.size() };
-		//VkDeviceSize iBufSize{ sizeof(uint16_t) * indices.size() };
-		//VkBufferCreateInfo bufferCI{ .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = vBufSize + iBufSize, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT };
-		//VmaAllocationCreateInfo vBufferAllocCI{ .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO };
-		//VmaAllocationInfo vBufferAllocInfo{};
+		if (vertices.size() % 3 != 0)
+		{
+			std::cout << "When loading " << filepath << " number of vertices was not a multiple of 3!\n";
+		}
+		std::cout << "Loading " << filepath << " with " << (int)vertices.size() / 3 << " vertices\n";
+		for (size_t i = 0; i < vertices.size(); i += 3)
+		{
+			glm::vec3 v0 = vertices[i].pos;
+			glm::vec3 v1 = vertices[i + 1].pos;
+			glm::vec3 v2 = vertices[i + 2].pos;
 
-		/*
-		Future plan: throw these in an array that gets passed to the GPU, since we dont actually want to use any of these vertices
-		for the vert/frag shaders (since we are doing jank raytracing instead :)
-		*/
+			glm::vec3 normal = glm::normalize(glm::cross(v1 - v0, v2 - v0));
 
-		//chk(vmaCreateBuffer(allocator, &bufferCI, &vBufferAllocCI, &vBuffer, &vBufferAllocation, &vBufferAllocInfo));
-		//memcpy(vBufferAllocInfo.pMappedData, vertices.data(), vBufSize);
-		//memcpy(((char*)vBufferAllocInfo.pMappedData) + vBufSize, indices.data(), iBufSize);
+			triangles.push_back(
+				Triangle{
+					.v0 = v0, .v1 = v1, .v2 = v2,
+					.normal = normal,
+					.d = -1 * dot(normal, v0),
+					.materialIndex = materialIndex
+				}
+			);
+		}
+
+
 		return true;
 	}
 
@@ -1006,9 +1083,11 @@ public:
 	{
 		// Sync
 		chk(vkWaitForFences(device, 1, &fences[frameIndex], true, UINT64_MAX));
+
 		chk(vkResetFences(device, 1, &fences[frameIndex]));
+
 		chkSwapchain(vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAcquiredSemaphores[frameIndex], VK_NULL_HANDLE, &imageIndex));
-		
+
 		shaderData.camera.rotationMatrix = glm::mat3x3(
 			camera.right,
 			camera.up,
@@ -1060,6 +1139,7 @@ public:
 		// Build command buffer
 		auto cb = commandBuffers[frameIndex];
 		chk(vkResetCommandBuffer(cb, 0));
+
 		VkCommandBufferBeginInfo cbBI{ 
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT 
 		};
