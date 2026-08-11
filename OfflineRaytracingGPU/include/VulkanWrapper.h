@@ -4,9 +4,10 @@
 #include "Utility.h"
 #include "KeyInputs.h"
 
+constexpr uint32_t maxBounces{ 3 };
 constexpr uint32_t maxFramesInFlight{ 2 };
 constexpr uint32_t numHistoryFrames{ 2 };
-constexpr uint32_t objectTypes{ 4 };
+constexpr uint32_t objectTypes{ 7 };
 constexpr glm::vec3 WORLD_UP{ 0, 1, 0 };
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -15,6 +16,7 @@ const bool enableValidationLayers = true;
 
 class VK_Wrap
 {
+	uint32_t bounces{ 0 };
 	uint32_t imageIndex{ 0 };
 	uint32_t frameIndex{ 0 };
 	VkInstance instance{ VK_NULL_HANDLE };
@@ -32,6 +34,7 @@ class VK_Wrap
 	VkImageView depthImageView;
 	std::vector<VkImage> swapchainImages;
 	std::vector<VkImageView> swapchainImageViews;
+	std::vector<VkImageLayout> swapchainImageLayouts;
 	std::array<VkCommandBuffer, maxFramesInFlight> commandBuffers;
 	std::array<VkFence, maxFramesInFlight> fences;
 	std::array<VkSemaphore, maxFramesInFlight> imageAcquiredSemaphores;
@@ -76,7 +79,12 @@ class VK_Wrap
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorPool descriptorPool;
 
-
+	// per frame image
+	VkImage frameImage{};
+	VkImageView frameImageView{};
+	VkImageLayout frameImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	VmaAllocation frameImageAllocation{};
+	VkFormat frameImageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
 
 	// Frame history
 	std::array<VkImage, numHistoryFrames> historyImages{};
@@ -142,6 +150,9 @@ public:
 	std::vector<Triangle> triangles;
 	std::vector<bvhNode> bvhNodes;
 	std::vector<Material> materials;
+	std::vector<GaussianSplat> splats;
+	std::vector<SphericalHarmonic> shMats;
+	std::vector<Ray> rayOrigins;
 	CameraWrapper camera;
 	ShaderData shaderData{};
 
@@ -161,6 +172,8 @@ public:
 		}		
 
 		destroyHistoryImages();
+
+		destroyFrameImage();
 
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -269,11 +282,22 @@ public:
 
 		loadStructuredBuffer("triangles", triangles);
 
+		loadStructuredBuffer("splats", splats);
+
+		loadStructuredBuffer("shMats", shMats);
+
 		loadStructuredBuffer("materials", materials);
 
 		loadStructuredBuffer("bvhNodes", bvhNodes);
 
+		std::cout << "Making ray buffer with " << windowSize.x * windowSize.y << "\n";
+
+		loadStructuredBuffer("rays", rayOrigins, windowSize.x * windowSize.y);
+
+
 		initHistoryImages();
+
+		initFrameImage();
 
 		initBindings();
 
@@ -283,10 +307,15 @@ public:
 
 		updateStructuredBufferDescriptors("triangles");
 
+		updateStructuredBufferDescriptors("splats");
+
+		updateStructuredBufferDescriptors("shMats");
+
 		updateStructuredBufferDescriptors("materials");
 		
 		updateStructuredBufferDescriptors("bvhNodes");
 
+		updateStructuredBufferDescriptors("rays");
 
 		for (auto& [name, b] : bindings)
 		{
@@ -352,7 +381,12 @@ public:
 		chk(SDL_Vulkan_GetPresentationSupport(instance, devices[deviceIndex], queueFamily));
 		// Logical device
 		const float qfpriorities{ 1.0f };
-		VkDeviceQueueCreateInfo queueCI{ .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = queueFamily, .queueCount = 1, .pQueuePriorities = &qfpriorities };
+		VkDeviceQueueCreateInfo queueCI{ 
+			.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, 
+			.queueFamilyIndex = queueFamily, 
+			.queueCount = 1, 
+			.pQueuePriorities = &qfpriorities 
+		};
 		VkPhysicalDeviceVulkan12Features enabledVk12Features{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 			.descriptorIndexing = true,
@@ -360,17 +394,19 @@ public:
 			.descriptorBindingVariableDescriptorCount = true,
 			.runtimeDescriptorArray = true,
 			.scalarBlockLayout = true,
-			.bufferDeviceAddress = true 
+			.bufferDeviceAddress = true
 		};
 		VkPhysicalDeviceVulkan13Features enabledVk13Features{ 
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, 
 			.pNext = &enabledVk12Features, 
 			.synchronization2 = true, 
-			.dynamicRendering = true 
+			.dynamicRendering = true
 		};
 		VkPhysicalDeviceFeatures enabledVk10Features{ 
 			.samplerAnisotropy = VK_TRUE,
+			.fragmentStoresAndAtomics = VK_TRUE,
 			.shaderInt64 = VK_TRUE
+
 		};
 		const std::vector<const char*> deviceExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 		VkDeviceCreateInfo deviceCI{
@@ -429,8 +465,18 @@ public:
 		swapchainImages.resize(imageCount);
 		chk(vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapchainImages.data()));
 		swapchainImageViews.resize(imageCount);
+		swapchainImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
 		for (auto i = 0; i < imageCount; i++) {
-			VkImageViewCreateInfo viewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = swapchainImages[i], .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = imageFormat, .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
+			VkImageViewCreateInfo viewCI{ 
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 
+				.image = swapchainImages[i], 
+				.viewType = VK_IMAGE_VIEW_TYPE_2D, 
+				.format = imageFormat, 
+				.subresourceRange{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, 
+					.levelCount = 1, 
+					.layerCount = 1 } 
+			};
 			chk(vkCreateImageView(device, &viewCI, nullptr, &swapchainImageViews[i]));
 		}
 		// Depth attachment
@@ -469,6 +515,91 @@ public:
 		shaderData.numSpheres = spheres.size();
 		shaderData.numTris = triangles.size();
 		shaderData.frameCount = 0;
+		shaderData.resetRays = true;
+	}
+
+	void initFrameImage()
+	{
+		VkImageCreateInfo imageCI{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType = VK_IMAGE_TYPE_2D,
+			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+			.extent{
+				.width = static_cast<uint32_t>(windowSize.x),
+				.height = static_cast<uint32_t>(windowSize.y),
+				.depth = 1
+			},
+			.mipLevels = 1,
+			.arrayLayers = 1,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.tiling = VK_IMAGE_TILING_OPTIMAL,
+			.usage =
+				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+				VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+				VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+		};
+
+		VmaAllocationCreateInfo allocCI{
+			.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+			.usage = VMA_MEMORY_USAGE_AUTO
+		};
+
+		chk(vmaCreateImage(
+			allocator,
+			&imageCI,
+			&allocCI,
+			&frameImage,
+			&frameImageAllocation,
+			nullptr
+		));
+
+		VkImageViewCreateInfo viewCI{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = frameImage,
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			}
+		};
+
+		chk(vkCreateImageView(
+			device,
+			&viewCI,
+			nullptr,
+			&frameImageView
+		));
+
+		frameImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+
+	void destroyFrameImage()
+	{
+		if (frameImageView != VK_NULL_HANDLE)
+		{
+			vkDestroyImageView(device, frameImageView, nullptr);
+			frameImageView = VK_NULL_HANDLE;
+		}
+
+		if (frameImage != VK_NULL_HANDLE)
+		{
+			vmaDestroyImage(
+				allocator,
+				frameImage,
+				frameImageAllocation
+			);
+
+			frameImage = VK_NULL_HANDLE;
+			frameImageAllocation = VK_NULL_HANDLE;
+		}
+
+		frameImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
 	void initHistoryImages()
@@ -485,7 +616,10 @@ public:
 			.mipLevels = 1, .arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.tiling = VK_IMAGE_TILING_OPTIMAL,
-			.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+			.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+					VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+					VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+					VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
 			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 		};
 		VmaAllocationCreateInfo allocCI{
@@ -626,7 +760,7 @@ public:
 		VkPipelineRenderingCreateInfo renderingCI{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 			.colorAttachmentCount = 1,
-			.pColorAttachmentFormats = &historyFormat,
+			.pColorAttachmentFormats = &frameImageFormat,
 			.depthAttachmentFormat = depthFormat
 		};
 		VkGraphicsPipelineCreateInfo pipelineCI{
@@ -900,13 +1034,22 @@ public:
 	}
 
 	template<typename T>
-	void loadStructuredBuffer(std::string bindingName, std::vector<T> data)
+	void loadStructuredBuffer(std::string bindingName, const std::vector<T>& data, size_t elementCount)
 	{
-		// check if a binding exists, if not return
+		if (data.size() == 0 && elementCount == 0)
+		{
+			std::cout << bindingName << " was empty\n";
+			elementCount = 1;
+		}
+		// check if a binding exists, if it does clear it
 		if (structuredBufferBindings.find(bindingName) != structuredBufferBindings.end())
 		{
 			std::cout << "Bindings already exist for " << bindingName << "\n";
-			return;
+			auto& binding = structuredBufferBindings[bindingName];
+			vmaDestroyBuffer(allocator, binding.stagingBuffer, binding.stagingAllocation);
+			vmaDestroyBuffer(allocator, binding.buffer, binding.bufferAllocation);
+			
+			//return;
 		}
 		if (bindings.find(bindingName) == bindings.end())
 		{
@@ -917,10 +1060,9 @@ public:
 		auto& binding = structuredBufferBindings[bindingName];
 
 		// Step 1: device-local buffer
-
 		binding.bufferInfo = VkBufferCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-			.size = sizeof(T) * data.size(),
+			.size = sizeof(T) * elementCount,
 			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE
 		};
@@ -945,8 +1087,10 @@ public:
 		chk(vmaCreateBuffer(allocator, &stagingInfo, &stagingCreateInfo,
 			&binding.stagingBuffer, &binding.stagingAllocation, &binding.stagingAllocInfo));
 
-		memcpy(binding.stagingAllocInfo.pMappedData, data.data(), (size_t)binding.bufferInfo.size);
-
+		if (!data.empty())
+		{
+			memcpy(binding.stagingAllocInfo.pMappedData, data.data(), (size_t)binding.bufferInfo.size);
+		}
 		VkCommandBufferAllocateInfo oneTimeAllocInfo{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 			.commandPool = commandPool,
@@ -995,6 +1139,12 @@ public:
 		vkDestroyFence(device, fenceOneTime, nullptr);
 		vkFreeCommandBuffers(device, commandPool, 1, &cbOneTime);
 	}
+	template <typename T>
+	void loadStructuredBuffer(std::string bindingName, const std::vector<T>& data)
+	{
+		size_t elementCount = std::max(data.size(), (size_t) 1);
+		loadStructuredBuffer(bindingName, data, elementCount);
+	}
 
 	void updateStructuredBufferDescriptors(std::string bindingName)
 	{
@@ -1031,6 +1181,27 @@ public:
 			vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 
 		}
+	}
+
+	void resizeRaysBuffer(glm::vec2 windowSize)
+	{
+		std::string bindingName = "rays";
+		if (structuredBufferBindings.find(bindingName) != structuredBufferBindings.end())
+		{
+			auto& binding = structuredBufferBindings[bindingName];
+			vmaDestroyBuffer(allocator, binding.stagingBuffer, binding.stagingAllocation);
+			vmaDestroyBuffer(allocator, binding.buffer, binding.bufferAllocation);
+		}
+		if (bindings.find(bindingName) == bindings.end())
+		{
+			std::cout << "Binding does not exist in reflection for " << bindingName << "\n";
+			return;
+		}
+
+		std::vector<Ray> rays = {};
+		size_t elementCount = windowSize.x * windowSize.y;
+		loadStructuredBuffer(bindingName, rays, elementCount);
+		updateStructuredBufferDescriptors(bindingName);
 	}
 
 	bool loadObj(std::string filepath, unsigned int materialIndex)
@@ -1074,7 +1245,245 @@ public:
 				}
 			);
 		}
+		return true;
+	}
 
+	bool loadSplat(std::string filepath)
+	{
+		std::ifstream file(filepath, std::ios::binary);
+		if (!file) {
+			throw std::runtime_error("Could not open PLY file: " + filepath);
+		}
+
+		std::string line;
+		if (!std::getline(file, line) || line != "ply") {
+			throw std::runtime_error("Not a PLY file: " + filepath);
+		}
+
+		bool sawFormat = false;
+		bool inVertex = false;
+		std::size_t vertexCount = 0;
+		std::size_t rowStride = 0;
+		std::vector<plyDetail::Property> properties;
+
+		while (std::getline(file, line)) {
+			if (!line.empty() && line.back() == '\r') {
+				line.pop_back();
+			}
+
+			if (line == "end_header") {
+				break;
+			}
+
+			std::vector<std::string> words = plyDetail::splitWords(line);
+			if (words.empty() || words[0] == "comment") {
+				continue;
+			}
+
+			if (words[0] == "format") {
+				if (words.size() < 3 || words[1] != "binary_little_endian") {
+					throw std::runtime_error("Only binary_little_endian PLY files are supported");
+				}
+				sawFormat = true;
+				continue;
+			}
+
+			if (words[0] == "element") {
+				if (words.size() < 3) {
+					throw std::runtime_error("Malformed PLY element line: " + line);
+				}
+				inVertex = words[1] == "vertex";
+				if (inVertex) {
+					vertexCount = static_cast<std::size_t>(std::stoull(words[2]));
+				}
+				continue;
+			}
+
+			if (inVertex && words[0] == "property") {
+				if (words.size() < 3 || words[1] == "list") {
+					throw std::runtime_error("Only scalar vertex properties are supported");
+				}
+
+				plyDetail::Property property;
+				property.name = words[2];
+				property.type = words[1];
+				property.offset = rowStride;
+				property.size = plyDetail::scalarSize(property.type);
+				rowStride += property.size;
+				properties.push_back(property);
+			}
+		}
+
+		if (!sawFormat) {
+			throw std::runtime_error("PLY file is missing a format line");
+		}
+		if (vertexCount == 0) {
+			throw std::runtime_error("PLY file has no vertex records");
+		}
+
+		std::unordered_map<std::string, std::size_t> lookup;
+		for (std::size_t i = 0; i < properties.size(); ++i) {
+			lookup[properties[i].name] = i;
+		}
+
+		const plyDetail::Property& x = plyDetail::requireProperty(lookup, properties, "x");
+		const plyDetail::Property& y = plyDetail::requireProperty(lookup, properties, "y");
+		const plyDetail::Property& z = plyDetail::requireProperty(lookup, properties, "z");
+		const plyDetail::Property& dcR = plyDetail::requireProperty(lookup, properties, "f_dc_0");
+		const plyDetail::Property& dcG = plyDetail::requireProperty(lookup, properties, "f_dc_1");
+		const plyDetail::Property& dcB = plyDetail::requireProperty(lookup, properties, "f_dc_2");
+		const plyDetail::Property& opacity = plyDetail::requireProperty(lookup, properties, "opacity");
+		const plyDetail::Property& scale0 = plyDetail::requireProperty(lookup, properties, "scale_0");
+		const plyDetail::Property& scale1 = plyDetail::requireProperty(lookup, properties, "scale_1");
+		const plyDetail::Property& scale2 = plyDetail::requireProperty(lookup, properties, "scale_2");
+		const plyDetail::Property& rot0 = plyDetail::requireProperty(lookup, properties, "rot_0");
+		const plyDetail::Property& rot1 = plyDetail::requireProperty(lookup, properties, "rot_1");
+		const plyDetail::Property& rot2 = plyDetail::requireProperty(lookup, properties, "rot_2");
+		const plyDetail::Property& rot3 = plyDetail::requireProperty(lookup, properties, "rot_3");
+
+		std::vector<const plyDetail::Property*> shRest;
+		for (int i = 0; i < SH_REST_FLOAT_COUNT; ++i) {
+			auto it = lookup.find("f_rest_" + std::to_string(i));
+			if (it == lookup.end()) {
+				break;
+			}
+			shRest.push_back(&properties[it->second]);
+		}
+		if (lookup.find("f_rest_" + std::to_string(SH_REST_FLOAT_COUNT)) != lookup.end()) {
+			throw std::runtime_error(
+				"PLY has more spherical harmonic coefficients than this loads");
+		}
+
+		if (shRest.size() % SH_CHANNEL_COUNT != 0) {
+			throw std::runtime_error(
+				"PLY f_rest_* properties must contain the same count per RGB channel");
+		}
+
+		const std::size_t restCountPerChannel = shRest.size() / SH_CHANNEL_COUNT;
+		if (restCountPerChannel == 0)
+		{
+			throw std::runtime_error(
+				"Failed to parse - restCountPerChannel was zero!"
+			);
+		}
+		std::vector<unsigned char> row(rowStride);
+		for (std::size_t i = 0; i < vertexCount; ++i) {
+			file.read(reinterpret_cast<char*>(row.data()), static_cast<std::streamsize>(row.size()));
+			if (!file) {
+				throw std::runtime_error("PLY ended before all vertex records were read");
+			}
+
+			// TODO: change this constructor to move the splat.update() function into the constructor
+			glm::vec3 center(
+				plyDetail::readAsFloat(row, x),
+				plyDetail::readAsFloat(row, y),
+				plyDetail::readAsFloat(row, z)
+			);
+			std::array<float, SH_FLOAT_COUNT> sphericalHarmonics = {};
+
+
+			sphericalHarmonics[0] = plyDetail::readAsFloat(row, dcR);
+			sphericalHarmonics[1] = plyDetail::readAsFloat(row, dcG);
+			sphericalHarmonics[2] = plyDetail::readAsFloat(row, dcB);
+			for (std::size_t channel = 0; channel < SH_CHANNEL_COUNT; ++channel) {
+				for (std::size_t coeff = 0; coeff < restCountPerChannel; ++coeff) {
+					std::size_t plyRestIndex = channel * restCountPerChannel + coeff;
+					std::size_t splatCoeff = coeff + 1;
+					std::size_t splatIndex = splatCoeff * SH_CHANNEL_COUNT + channel;
+					sphericalHarmonics[splatIndex] =
+						plyDetail::readAsFloat(row, *shRest[plyRestIndex]);
+				}
+			}
+			float raw_alpha = plyDetail::readAsFloat(row, opacity);
+			float alpha = 1.0 / (1.0 + std::exp(-raw_alpha));
+			glm::vec3 scale(
+				std::exp(plyDetail::readAsFloat(row, scale0)),
+				std::exp(plyDetail::readAsFloat(row, scale1)),
+				std::exp(plyDetail::readAsFloat(row, scale2))
+			);
+
+			glm::vec3 invScale2(
+				1.f / (scale.x * scale.x),
+				1.f / (scale.y * scale.y),
+				1.f / (scale.z * scale.z)
+			);
+
+			glm::quat rotation(
+				plyDetail::readAsFloat(row, rot0),
+				plyDetail::readAsFloat(row, rot1),
+				plyDetail::readAsFloat(row, rot2),
+				plyDetail::readAsFloat(row, rot3)
+			);
+			float len = glm::length(rotation);
+
+
+			rotation = glm::normalize(rotation);
+
+			glm::mat3 R = glm::mat3_cast(rotation);
+
+			float detR = glm::determinant(R);
+
+
+
+			float scale_mod = 1;
+			glm::mat3 S(1.0f);
+			S[0][0] = scale.x * scale_mod;
+			S[1][1] = scale.y * scale_mod;
+			S[2][2] = scale.z * scale_mod;
+
+			glm::mat3 M = R * S; // S * R in cpu version
+			glm::mat3 sigma = M * glm::transpose(M);
+			glm::mat3 invSigma = glm::inverse(sigma);
+			float eps = 0.01;
+			float k = std::sqrt(-2.0 * std::log(eps)); // radius of ellipsoid in "S" units
+			//std::cout << "Alpha: " << alpha << "\n";
+			// ellipsoid semi-axes in world space = k * s_x, k * s_y, k * s_z along R's columns
+			glm::vec3 axis0 = k * scale.x * glm::vec3(R[0]); // R's basis vectors (columns)
+			glm::vec3 axis1 = k * scale.y * glm::vec3(R[1]);
+			glm::vec3 axis2 = k * scale.z * glm::vec3(R[2]);
+
+			// AABB half-extents = sum of |component| along each world axis
+			glm::vec3 halfExtent(
+				std::abs(axis0.x) + std::abs(axis1.x) + std::abs(axis2.x),
+				std::abs(axis0.y) + std::abs(axis1.y) + std::abs(axis2.y),
+				std::abs(axis0.z) + std::abs(axis1.z) + std::abs(axis2.z)
+			);
+			
+			SphericalHarmonic shMat{
+				.degree =  SH_REST_FLOAT_COUNT / (int) restCountPerChannel,
+			};
+			for (int i = 0; i < SH_COUNT; i++)
+			{
+				int shIndex = i * SH_CHANNEL_COUNT;
+				shMat.sh[i] = glm::vec3(sphericalHarmonics[shIndex], sphericalHarmonics[shIndex + 1], sphericalHarmonics[shIndex + 2]);
+			}
+			int shIndex = shMats.size();
+			shMats.push_back(shMat);
+
+			// doing it this way because it means less new code on the GPU side
+			// TODO: change how these work so less wasted memory
+			Material mat{
+				.color = glm::vec4(0),
+				.metallicOrIor = 0,
+				.emissiveColor = glm::vec4(0),
+				.SHIndex = shIndex
+			};
+			unsigned int matIndex = materials.size();
+
+			glm::mat3x3 identity(1);
+
+			materials.push_back(mat);
+			GaussianSplat gs{
+				.center = center,
+				.invSigma = invSigma,
+				.rotation = R,
+				.invScale2 = invScale2,
+				.alpha = alpha,
+				.materialIndex = matIndex,
+				.halfExtent = halfExtent
+			};
+			splats.push_back(gs);
+		}
 
 		return true;
 	}
@@ -1095,46 +1504,27 @@ public:
 		);
 		shaderData.camera.origin = camera.origin;
 		shaderData.camera.fov = camera.fov;
-		shaderData.frameCount += 1;
+		shaderData.camDir = glm::normalize(camera.direction);
+
+		const bool firstBounce = bounces == 0;
+		const bool finalBounce = bounces == maxBounces - 1;
+
+		shaderData.resetRays = firstBounce;
+		++bounces;
+		
 		memcpy(shaderDataBuffers[frameIndex].allocationInfo.pMappedData, &shaderData, sizeof(ShaderData));
 
+		if (finalBounce)
+		{
+			++shaderData.frameCount;
+			bounces = 0;
+		}
 		// historyReadIndex is either 0 or 1, so this is either 1 or 0
 		// TODO: better system that can handle more frames (irrelevant for this specific task)
 		int historyWriteIndex = 1 - historyReadIndex;
 		updateHistoryDescriptor();
-		// also build the two barriers
-		std::array<VkImageMemoryBarrier2, 2> historyBarriers{
-			VkImageMemoryBarrier2{
-				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-				.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-				.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-				.oldLayout = historyImageLayouts[historyWriteIndex],
-				.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-				.image = historyImages[historyWriteIndex],
-				.subresourceRange{
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.levelCount = 1,
-					.layerCount = 1
-				}
-			},
-			VkImageMemoryBarrier2{
-				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-				.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-				.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-				.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
-				.oldLayout = historyImageLayouts[historyReadIndex],
-				.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				.image = historyImages[historyReadIndex],
-				.subresourceRange{
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.levelCount = 1,
-					.layerCount = 1
-				}
-			}
-		};
+		
+
 
 		// Build command buffer
 		auto cb = commandBuffers[frameIndex];
@@ -1145,19 +1535,61 @@ public:
 		};
 		chk(vkBeginCommandBuffer(cb, &cbBI));
 
-		// history images
-		VkDependencyInfo historyBarrierDI{
-			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, 
-			.imageMemoryBarrierCount = 2, 
-			.pImageMemoryBarriers = historyBarriers.data()
+		// swapchain image
+		VkImageMemoryBarrier2 frameImageToAttachment{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			.oldLayout = frameImageLayout,
+			.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+			.image = frameImage,
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
 		};
-		vkCmdPipelineBarrier2(cb, &historyBarrierDI);
-		historyImageLayouts[historyWriteIndex] = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
-		historyImageLayouts[historyReadIndex] = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-		// swapchain and depth
-		std::array<VkImageMemoryBarrier2, 1> outputBarriers{
-			VkImageMemoryBarrier2{
+		VkDependencyInfo frameImageToAttachmentDI{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &frameImageToAttachment
+		};
+
+		vkCmdPipelineBarrier2(cb, &frameImageToAttachmentDI);
+		frameImageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+
+		// history read
+		VkImageMemoryBarrier2 historyReadBarrier{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+			.oldLayout = historyImageLayouts[historyReadIndex],
+			.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.image = historyImages[historyReadIndex],
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo historyReadDI{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &historyReadBarrier
+		};
+
+		vkCmdPipelineBarrier2(cb, &historyReadDI);
+
+		historyImageLayouts[historyReadIndex] =	VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		// depth
+		VkImageMemoryBarrier2 depthBarrier{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
 				.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -1166,22 +1598,27 @@ public:
 				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 				.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 				.image = depthImage,
-				.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, .levelCount = 1, .layerCount = 1 }
-			}
+				.subresourceRange{
+					.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
 		};
-		VkDependencyInfo barrierDependencyInfo{ 
-			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, 
-			.imageMemoryBarrierCount = static_cast<uint32_t>(outputBarriers.size()), 
-			.pImageMemoryBarriers = outputBarriers.data()
+		VkDependencyInfo depthDI{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &depthBarrier
 		};
-		vkCmdPipelineBarrier2(cb, &barrierDependencyInfo);
+		vkCmdPipelineBarrier2(cb, &depthDI);
+
+		// rendering
 		VkRenderingAttachmentInfo colorAttachmentInfo{
 			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-			.imageView = historyImageViews[historyWriteIndex],
+			.imageView = frameImageView,
 			.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-			.clearValue{.color{ 0.0f, 0.0f, 0.0f, 1.0f }}
+			.clearValue{.color{0.f, 0.f, 0.f, 1.f}}
 		};
 		VkRenderingAttachmentInfo depthAttachmentInfo{
 			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -1189,23 +1626,36 @@ public:
 			.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.clearValue = {.depthStencil = {1.0f,  0}}
+			.clearValue{.depthStencil{1.f, 0}}
 		};
+
 		VkRenderingInfo renderingInfo{
 			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-			.renderArea{.extent{.width = static_cast<uint32_t>(windowSize.x), .height = static_cast<uint32_t>(windowSize.y) }},
+			.renderArea{
+				.extent{
+					.width = static_cast<uint32_t>(windowSize.x),
+					.height = static_cast<uint32_t>(windowSize.y)
+				}
+			},
 			.layerCount = 1,
 			.colorAttachmentCount = 1,
 			.pColorAttachments = &colorAttachmentInfo,
 			.pDepthAttachment = &depthAttachmentInfo
 		};
+
 		vkCmdBeginRendering(cb, &renderingInfo);
-		VkViewport vp{ 
-			.width = static_cast<float>(windowSize.x), .height = static_cast<float>(windowSize.y), .minDepth = 0.0f, .maxDepth = 1.0f 
+		VkViewport vp{
+			.width = static_cast<float>(windowSize.x), 
+			.height = static_cast<float>(windowSize.y), 
+			.minDepth = 0.0f, 
+			.maxDepth = 1.0f
 		};
 		vkCmdSetViewport(cb, 0, 1, &vp);
-		VkRect2D scissor{ 
-			.extent{.width = static_cast<uint32_t>(windowSize.x), .height = static_cast<uint32_t>(windowSize.y) } 
+		VkRect2D scissor{
+			.extent{
+				.width = static_cast<uint32_t>(windowSize.x), 
+				.height = static_cast<uint32_t>(windowSize.y) 
+			}
 		};
 		vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 		vkCmdSetScissor(cb, 0, 1, &scissor);
@@ -1213,103 +1663,228 @@ public:
 		VkDeviceSize vOffset{ 0 };
 		vkCmdBindVertexBuffers(cb, 0, 1, &vBuffer, &vOffset);
 		vkCmdBindIndexBuffer(cb, vBuffer, vBufSize, VK_INDEX_TYPE_UINT16);
-		vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &shaderDataBuffers[frameIndex].deviceAddress);
+		vkCmdPushConstants(
+			cb, 
+			pipelineLayout, 
+			VK_SHADER_STAGE_VERTEX_BIT, 
+			0, 
+			sizeof(VkDeviceAddress), 
+			&shaderDataBuffers[frameIndex].deviceAddress
+		);
 		vkCmdDrawIndexed(cb, indexCount, 1, 0, 0, 0);
 		vkCmdEndRendering(cb);
 
-		// blit image
-		std::array<VkImageMemoryBarrier2, 2> blitSrcDstBarriers{
-			VkImageMemoryBarrier2{
+		// transition frame image
+		VkImageMemoryBarrier2 frameImageToTransfer{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT |
+							VK_PIPELINE_STAGE_2_COPY_BIT,
+			.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			.image = frameImage,
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo frameImageToTransferDI{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &frameImageToTransfer
+		};
+
+		vkCmdPipelineBarrier2(cb, &frameImageToTransferDI);
+
+		frameImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+		// transition swapchain to transfer dst
+		VkImageMemoryBarrier2 swapchainToTransfer{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+			.srcAccessMask = VK_ACCESS_2_NONE,
+			.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
+			.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.oldLayout = swapchainImageLayouts[imageIndex],
+			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.image = swapchainImages[imageIndex],
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo swapchainToTransferDI{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &swapchainToTransfer
+		};
+
+		vkCmdPipelineBarrier2(cb, &swapchainToTransferDI);
+
+		swapchainImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+		// blit swapchain and frameImage
+		VkImageBlit blitRegion{
+			.srcSubresource{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.layerCount = 1
+			},
+			.srcOffsets = {
+				{0, 0, 0},
+				{
+					static_cast<int32_t>(windowSize.x),
+					static_cast<int32_t>(windowSize.y),
+					1
+				}
+			},
+
+			.dstSubresource{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.layerCount = 1
+			},
+			.dstOffsets = {
+				{0, 0, 0},
+				{
+					static_cast<int32_t>(windowSize.x),
+					static_cast<int32_t>(windowSize.y),
+					1
+				}
+			}
+		};
+
+		vkCmdBlitImage(
+			cb, 
+			frameImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &blitRegion, VK_FILTER_NEAREST
+		);
+
+		if (finalBounce)
+		{
+			VkImageMemoryBarrier2 historyWriteToTransfer{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-				.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
-				.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-				.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+				.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+				.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+				.oldLayout = historyImageLayouts[historyWriteIndex],
+				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 				.image = historyImages[historyWriteIndex],
 				.subresourceRange{
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 					.levelCount = 1,
 					.layerCount = 1
 				}
-			},
-			VkImageMemoryBarrier2{
+			};
+
+			VkDependencyInfo historyWriteToTransferDI{
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.imageMemoryBarrierCount = 1,
+				.pImageMemoryBarriers = &historyWriteToTransfer
+			};
+
+			vkCmdPipelineBarrier2(cb, &historyWriteToTransferDI);
+			historyImageLayouts[historyWriteIndex] = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+			// copy
+			VkImageCopy historyCopyRegion{
+				.srcSubresource{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.layerCount = 1
+				},
+				.srcOffset{0, 0, 0},
+				.dstSubresource{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.layerCount = 1
+				},
+				.dstOffset{0, 0, 0},
+				.extent{
+					.width = static_cast<uint32_t>(windowSize.x),
+					.height = static_cast<uint32_t>(windowSize.y),
+					.depth = 1
+				}
+			};
+
+			vkCmdCopyImage( cb,
+				frameImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				historyImages[historyWriteIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				1, &historyCopyRegion
+			);
+			VkImageMemoryBarrier2 historyReady{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-				.srcAccessMask = 0,
-				.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
-				.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				.image = swapchainImages[imageIndex],
+				.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+				.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+				.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+				.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				.image = historyImages[historyWriteIndex],
 				.subresourceRange{
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 					.levelCount = 1,
-					.layerCount = 1,
-
+					.layerCount = 1
 				}
-			}
-		};
-		VkDependencyInfo blitSrcDstDI{
-			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-			.imageMemoryBarrierCount = 2,
-			.pImageMemoryBarriers = blitSrcDstBarriers.data()
-		};
-		vkCmdPipelineBarrier2(cb, &blitSrcDstDI);
+			};
 
-		VkImageBlit blitRegion{
-			.srcSubresource{
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.layerCount = 1
-			},
-			.srcOffsets = {{0, 0, 0}, {windowSize.x, windowSize.y, 1}},
-			.dstSubresource{
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.layerCount = 1
-			},
-			.dstOffsets = {{0, 0, 0}, {windowSize.x, windowSize.y, 1}}
-		};
-		vkCmdBlitImage(cb,
-			historyImages[historyWriteIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			1, &blitRegion, VK_FILTER_NEAREST);
+			VkDependencyInfo historyReadyDI{
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.imageMemoryBarrierCount = 1,
+				.pImageMemoryBarriers = &historyReady
+			};
 
-		historyImageLayouts[historyWriteIndex] = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			vkCmdPipelineBarrier2(cb, &historyReadyDI);
 
-
-		VkImageMemoryBarrier2 barrierPresent{
+			historyImageLayouts[historyWriteIndex] = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			historyReadIndex = historyWriteIndex;
+		}
+		
+		VkImageMemoryBarrier2 presentBarrier{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 			.srcStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
 			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-			.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-			.dstAccessMask = 0,
+			.dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+			.dstAccessMask = VK_ACCESS_2_NONE,
 			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 			.image = swapchainImages[imageIndex],
-			.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
 		};
-		VkDependencyInfo barrierPresentDependencyInfo{ 
-			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, 
-			.imageMemoryBarrierCount = 1, 
-			.pImageMemoryBarriers = &barrierPresent 
+
+		VkDependencyInfo presentDI{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &presentBarrier
 		};
-		vkCmdPipelineBarrier2(cb, &barrierPresentDependencyInfo);
+
+		vkCmdPipelineBarrier2(cb, &presentDI);
+
+		swapchainImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		
+
 		chk(vkEndCommandBuffer(cb));
-		// Submit to graphics queue
-		VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+		VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 		VkSubmitInfo submitInfo{
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 			.waitSemaphoreCount = 1,
 			.pWaitSemaphores = &imageAcquiredSemaphores[frameIndex],
-			.pWaitDstStageMask = &waitStages,
+			.pWaitDstStageMask = &waitStage,
 			.commandBufferCount = 1,
 			.pCommandBuffers = &cb,
 			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &renderCompleteSemaphores[imageIndex],
+			.pSignalSemaphores = &renderCompleteSemaphores[imageIndex]
 		};
+
 		chk(vkQueueSubmit(queue, 1, &submitInfo, fences[frameIndex]));
-		frameIndex = (frameIndex + 1) % maxFramesInFlight;
 		VkPresentInfoKHR presentInfo{
 			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 			.waitSemaphoreCount = 1,
@@ -1318,7 +1893,11 @@ public:
 			.pSwapchains = &swapchain,
 			.pImageIndices = &imageIndex
 		};
+
 		chkSwapchain(vkQueuePresentKHR(queue, &presentInfo));
+
+		frameIndex = (frameIndex + 1) % maxFramesInFlight;
+		
 		// Event polling
 		float elapsedTime{ (SDL_GetTicks() - lastTime) / 1000.0f };
 		lastTime = SDL_GetTicks();
@@ -1389,12 +1968,11 @@ public:
 		if (camMoved)
 		{
 			shaderData.frameCount = 0;
+			bounces = 0;
 		}
 
-		// update history read index
-		historyReadIndex = historyWriteIndex;
-
 		if (updateSwapchain) {
+			bounces = 0;
 			chk(SDL_GetWindowSize(window, &windowSize.x, &windowSize.y));
 			shaderData.windowMax = windowSize;
 			updateSwapchain = false;
@@ -1410,6 +1988,7 @@ public:
 			swapchainImages.resize(imageCount);
 			chk(vkGetSwapchainImagesKHR(device, swapchain, &imageCount, swapchainImages.data()));
 			swapchainImageViews.resize(imageCount);
+			swapchainImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
 			for (auto i = 0; i < imageCount; i++) {
 				VkImageViewCreateInfo viewCI{ 
 					.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 
@@ -1428,6 +2007,13 @@ public:
 			destroyHistoryImages();
 			initHistoryImages();
 
+			destroyFrameImage();
+			initFrameImage();
+
+			resizeRaysBuffer(windowSize);
+
+			// TODO: destroy and reinit 
+
 			for (auto& semaphore : renderCompleteSemaphores) {
 				vkDestroySemaphore(device, semaphore, nullptr);
 			}
@@ -1445,8 +2031,5 @@ public:
 			chk(vkCreateImageView(device, &viewCI, nullptr, &depthImageView));
 		}
 		return quit;
-	}
-
-	
-
+	};
 };

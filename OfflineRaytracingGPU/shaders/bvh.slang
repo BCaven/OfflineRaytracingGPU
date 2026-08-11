@@ -4,8 +4,16 @@ public static float4 backgroundColor = float4(1);
 
 public StructuredBuffer<Sphere> spheres;
 public StructuredBuffer<Triangle> triangles;
+public StructuredBuffer<GaussianSplat> splats;
+public StructuredBuffer<SphericalHarmonic> shMats;
 public StructuredBuffer<Material> materials;
 public StructuredBuffer<bvhNode> bvhNodes;
+public RWStructuredBuffer<Ray> rays;
+
+public void reset_ray(int rayIndex, float3 origin, float3 direction)
+{
+    rays[rayIndex] = Ray(origin, direction, float4(1), float4(0));
+}
 
 public void init_rng(float2 pixel, int windowWidth, int frameCount)
 {
@@ -37,6 +45,19 @@ uint xorshift()
 public float rand_float()
 {
     return bit_cast<float>(0x3f800000u | (xorshift() >> 9u)) - 1.0;
+}
+
+// TODO later: Ziggurat method iff this is slow
+float sample_normal_01()
+{
+    float r1 = max(rand_float(), 1e-8);
+    float r2 = max(rand_float(), 1e-8);
+    return sqrt(-2.0 * log( r1 )) * cos( TWO_PI * r2);
+}
+
+float sample_normal_distribution(float mean, float std_dev)
+{
+    return mean + std_dev * sample_normal_01();
 }
 
 float3 sample_sphere()
@@ -76,16 +97,19 @@ float luminance(float4 rgba)
     return dot(rgba, float4(0.2126, 0.7152, 0.0722, 1));
 }
 
-Scatter scatter(Ray input_ray, Intersection hit, Material material)
+void scatter(int rayIndex, Intersection hit, Material material, float3 camDir)
 {
     // TODO: microfacet BRDF
+    // Also TODO: energy
+
+    Ray input_ray = rays[rayIndex];
 
     float3 incident = normalize(input_ray.direction);
     float incident_dot_normal = dot(incident, hit.normal);
     bool is_front_face = incident_dot_normal < 0;
     float3 N = select(is_front_face, hit.normal, -hit.normal);
     float cos_theta = abs(incident_dot_normal);
-
+    bool useSH = material.SHIndex >= 0;
     bool is_transmissive = material.metallicOrIor < 0;
     float ior = abs(material.metallicOrIor);
     float ref_ratio = select(is_front_face, 1 / ior, ior);
@@ -96,8 +120,50 @@ Scatter scatter(Ray input_ray, Intersection hit, Material material)
 
     bool choose_specular = false;
     float4 attenuation = material.color;
+    
+    if (useSH)
+    {
+        float3 dir = camDir;
+        choose_specular = false;
+        is_transmissive = false;
+        SphericalHarmonic shMat = shMats[material.SHIndex];
+        float3 result = SH_C0 * shMat.sh[0];
+        if (shMat.degree > 0)
+        {
+            float x = dir.x;
+            float y = dir.y;
+            float z = dir.z;
+            result = result - SH_C1 * y * shMat.sh[1] + SH_C1 * z * shMat.sh[2] - SH_C1 * x * shMat.sh[3];
 
-    if (is_transmissive)
+            if (shMat.degree > 1)
+            {
+                float xx = x * x, yy = y * y, zz = z * z;
+                float xy = x * y, yz = y * z, xz = x * z;
+                result = result +
+                    SH_C2[0] * xy * shMat.sh[4] +
+                    SH_C2[1] * yz * shMat.sh[5] +
+                         SH_C2[2] * (2.0f * zz - xx - yy) * shMat.sh[6] +
+                    SH_C2[3] * xz * shMat.sh[7] +
+                         SH_C2[4] * (xx - yy) * shMat.sh[8];
+
+                if (shMat.degree > 2)
+                {
+                    result = result +
+                        SH_C3[0] * y * (3.0f * xx - yy) * shMat.sh[9] +
+                        SH_C3[1] * xy * z * shMat.sh[10] +
+                             SH_C3[2] * y * (4.0f * zz - xx - yy) * shMat.sh[11] +
+                             SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * shMat.sh[12] +
+                             SH_C3[4] * x * (4.0f * zz - xx - yy) * shMat.sh[13] +
+                             SH_C3[5] * z * (xx - yy) * shMat.sh[14] +
+                             SH_C3[6] * x * (xx - 3.0f * yy) * shMat.sh[15];
+                }
+            }
+        }
+        result += 0.5f;
+        result = max(result, 0.f);
+        attenuation = float4(result, 1);
+    }
+    else if (is_transmissive)
     {
         bool cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1;
         float f0 = schlick_f0_from_ior(ref_ratio);
@@ -145,8 +211,9 @@ Scatter scatter(Ray input_ray, Intersection hit, Material material)
         scattered = sample_lamberian(N);
     }
 
-    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered);
-    return Scatter(attenuation, outputRay);
+    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered, input_ray.scatter * attenuation, input_ray.emission + material.emissiveColor);
+
+    rays[rayIndex] = outputRay;
 };
 
 float3 point_on_ray(Ray ray, float t)
@@ -226,39 +293,52 @@ Intersection intersect_triangle(Ray ray, Triangle tri)
     return Intersection(tri.normal, t, tri.materialIndex);
 }
 
-Intersection intersect_scene(Ray ray, uint numSpheres, uint numTris)
+Intersection intersect_splat(Ray ray, GaussianSplat gs, float closest_t)
 {
-    // Replace o(N) with BVH
+    float3 w = ray.direction;
+    float3 X = ray.origin - gs.center;
 
-    Intersection intersection = no_intersection();
-    intersection.t = FLT_MAX;
-    for (uint i = 0; i < numSpheres; i++)
+    float3x3 Rt = transpose(gs.rotation);
+
+    float3 Xl = mul(Rt, X);
+    float3 wl = mul(Rt, w);
+    float3 wl2 = wl * wl;
+    float3 invScale2 = gs.invScale2;
+    float A = dot(wl2, invScale2);
+    float B = dot(Xl * wl, invScale2);
+
+    float mean_t = -B / A; 
+
+    // reject if past the closest collision or if behind the ray
+    if (mean_t > closest_t || mean_t < EPSILON)
     {
-        Intersection hit = intersect_sphere(ray, spheres[i]);
-        if (hit.t > 0 && hit.t < intersection.t)
-        {
-            intersection = hit;
-        }
+        return no_intersection();
     }
-    for (uint i = 0; i < numTris; i++)
-    {
-        Intersection hit = intersect_triangle(ray, triangles[i]);
-        if (hit.t > 0 && hit.t < intersection.t)
-        {
-            intersection = hit;
-        }
-    }
-    return intersection;
+
+    float3 dl = Xl + mean_t * wl;
+
+    float sample = dot(dl * dl, invScale2); 
+    if (sample > SPLAT_CUTOFF) return no_intersection();
+
+    float alpha = gs.alpha * exp(-0.5 * sample);
+    float roulette = rand_float();
+
+    if (roulette >= alpha) return no_intersection();
+
+    float3 localGradient = dl * invScale2;
+    float3 normal = normalize(mul(gs.rotation, localGradient));
+    
+    return Intersection(normal, mean_t, gs.materialIndex);
 }
 
-float intersect_aabb(Ray ray, bvhNode bvh)
+float2 aabb_bounds(Ray ray, float3 min, float3 max)
 {
     float ray_t_min = -FLT_MAX;
     float ray_t_max = FLT_MAX;
     for (uint axis = 0; axis < 3; axis++)
     {
-        const float ax_min = bvh.min[axis];
-        const float ax_max = bvh.max[axis];
+        const float ax_min = min[axis];
+        const float ax_max = max[axis];
         const float adinv = 1. / ray.direction[axis];
         float t0 = (ax_min - ray.origin[axis]) * adinv;
         float t1 = (ax_max - ray.origin[axis]) * adinv;
@@ -275,18 +355,24 @@ float intersect_aabb(Ray ray, bvhNode bvh)
 
         if (ray_t_max <= ray_t_min)
         {
-            return FLT_MAX;
+            return float2(FLT_MAX);
         }
     }
-    if (ray_t_min > 0)
+    if (ray_t_min > EPSILON)
     {
-        return ray_t_min;
+        return float2(ray_t_min, ray_t_max);
     }
-    else if (ray_t_max > 0)
+    else if (ray_t_max > EPSILON)
     {
-        return ray_t_max;
+        return float2(EPSILON, ray_t_max);
     }
-    return FLT_MAX;
+    return float2(FLT_MAX);
+}
+
+float intersect_aabb(Ray ray, bvhNode bvh)
+{
+    float2 bounds = aabb_bounds(ray, bvh.min, bvh.max);
+    return bounds.x;
 }
 
 void ProcessPrimitive(
@@ -309,6 +395,9 @@ void ProcessPrimitive(
         break;
     case PrimType::TRIANGLE:
         hit = intersect_triangle(ray, triangles[index]);
+        break;
+    case PrimType::GAUSSIAN_SPLAT:
+        hit = intersect_splat(ray, splats[index], closest.t);
         break;
     default:
         return;
@@ -408,29 +497,23 @@ Intersection intersect_scene_bvh(Ray ray, uint rootIndex)
     return closest;
 }
 
-public float4 ray_color(Ray ray, uint numTris, uint numSpheres, uint bvhRoot)
+public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir)
 {
-    float4 throughputScatter = float4(1);
-    float4 throughputEmission = float4(0);
-    float4 radianceSample = float4(0);
-
-    uint pathLength = 0;
-    while (pathLength < MAX_PATH_LENGTH)
+    Ray ray = rays[rayIndex];
+    float4 throughputScatter = ray.scatter;
+    float4 throughputEmission = ray.emission;
+    float4 radianceSample = throughputScatter * throughputEmission;
+    
+    // TODO: obv this fails if there is no BVH
+    Intersection intersection = intersect_scene_bvh(ray, bvhRoot);
+    if (!valid_intersection(intersection))
     {
-        // TODO: obv this fails if there is no BVH
-        Intersection intersection = intersect_scene_bvh(ray, bvhRoot);
-        if (!valid_intersection(intersection))
-        {
-            radianceSample += throughputScatter * throughputEmission * sky_color(ray);
-            break;
-        }
-        Material material = materials[intersection.materialIndex];
-        Scatter scattered = scatter(ray, intersection, material);
-        throughputEmission += material.emissiveColor;
-        throughputScatter *= scattered.attenuation;
-        ray = scattered.ray;
-        pathLength += 1;
+        return throughputScatter * (throughputEmission + sky_color(ray));
     }
+    Material material = materials[intersection.materialIndex];
 
-    return radianceSample;
+    scatter(rayIndex, intersection, material, camDir);
+    ray = rays[rayIndex];
+
+    return ray.emission * ray.scatter; 
 }

@@ -20,7 +20,7 @@ int main()
 
 	std::random_device rd;
 	std::mt19937 gen(rd());
-	std::uniform_int_distribution<> rand(0, 3);
+	std::uniform_int_distribution<> rand(0, 5);
 
 
 	VK_Wrap wrapper;
@@ -31,33 +31,37 @@ int main()
 	glm::vec4 pastel_purple = glm::vec4(181, 150, 243, 255) / 255.0f;
 	glm::vec4 pastel_grey = glm::vec4(139, 157, 180, 255) / 255.f;
 	glm::vec4 light_white = glm::vec4(10);
-	glm::vec4 sky = glm::vec4(230, 240, 240, 255) / 255.f;
-
-
-
-	wrapper.spheres = {
-		Sphere(glm::vec3(0, -1001.5, 0), 1000, 5),
-	};
-	float radius = 3;
-	float offset = radius / 2;
-	for (float r = 0; r < PI * 2; r+=PI / 8)
-	{
-		wrapper.spheres.push_back(
-			Sphere{  glm::vec3( offset + (std::sin(r) * radius), -1, offset + (std::cos(r) * radius)), 0.5, (unsigned int) rand(gen)}
-		);
-	}
-
-	wrapper.loadObj("assets/suzanne.obj", 4);
+	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
+	glm::vec4 sky = 10.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 1},
 			Material{ pastel_green, -1.5 },
 			Material{ pastel_blue, 0.5 },
 			Material{ pastel_purple, 0, light_white},
+			Material{ pastel_purple, 0, light_purple},
 			Material{ pastel_orange, 0},
 			Material{ pastel_grey, 0 }
 
 	};
+
+	wrapper.spheres = {
+		//Sphere(glm::vec3(0, -1001.5, 0), 1000, 5),
+	};
+	float radius = 13;
+	float offset = radius / 2;
+	for (float r = 0; r < PI * 2; r+=PI / 8)
+	{
+		wrapper.spheres.push_back(
+			Sphere{  glm::vec3( offset + (std::sin(r) * radius), -3, offset + (std::cos(r) * radius)), 2, (unsigned int) rand(gen)}
+		);
+	}
+
+	wrapper.loadObj("assets/suzanne.obj", 5);
+
+	wrapper.loadSplat("assets/readingroom_20x_180.ply");
+
+	std::cout << "Number of splats: " << wrapper.splats.size() << "\n";
 
 	wrapper.camera = CameraWrapper{
 		.origin = glm::vec3(0, 0.75, 1),
@@ -101,6 +105,13 @@ int main()
 
 		sceneMin = make_aabb_min(sceneMin, triMin);
 		sceneMax = make_aabb_max(sceneMax, triMax);
+	}
+	for (const auto& splat : wrapper.splats)
+	{
+		glm::vec3 splatMin = splat.center - splat.halfExtent;
+		glm::vec3 splatMax = splat.center + splat.halfExtent;
+		sceneMin = make_aabb_min(sceneMin, splatMin);
+		sceneMax = make_aabb_max(sceneMax, splatMax);
 	}
 
 	glm::vec3 invSceneExtent = 1.f / make_aabb_max(sceneMax - sceneMin, glm::vec3(1e-8));
@@ -192,6 +203,48 @@ int main()
 				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
 				.rightPrim = PrimType::EMPTY,
 				.leftPrim = PrimType::TRIANGLE,
+				.leftIndex = (int)i,
+				.rightIndex = -1,
+				});
+		}
+	}
+	for (size_t i = 0; i < wrapper.splats.size(); i += 2)
+	{
+		if (i + 1 < wrapper.splats.size())
+		{
+			const auto& s0 = wrapper.splats[i];
+			const auto& s1 = wrapper.splats[i + 1];
+
+			glm::vec3 min = make_aabb_min(s0.center - s0.halfExtent, s1.center - s1.halfExtent);
+			glm::vec3 max = make_aabb_max(s0.center + s0.halfExtent, s1.center + s1.halfExtent);
+
+			glm::vec3 center = (min + max) * 0.5f;
+
+
+			bvhNodes.push_back(bvhNode{
+				.min = min,
+				.max = max,
+				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
+				.rightPrim = PrimType::GAUSSIAN_SPLAT,
+				.leftPrim = PrimType::GAUSSIAN_SPLAT,
+				.leftIndex = (int)i,
+				.rightIndex = (int)i + 1,
+				});
+		}
+		else
+		{
+			const auto& s0 = wrapper.splats[i];
+
+			glm::vec3 min = s0.center - s0.halfExtent;
+			glm::vec3 max = s0.center + s0.halfExtent;
+			glm::vec3 center = (min + max) * 0.5f;
+
+			bvhNodes.push_back(bvhNode{
+				.min = min,
+				.max = max,
+				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
+				.rightPrim = PrimType::EMPTY,
+				.leftPrim = PrimType::GAUSSIAN_SPLAT,
 				.leftIndex = (int)i,
 				.rightIndex = -1,
 				});

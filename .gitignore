@@ -361,3 +361,12 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Ignore assets folder
+
+assets/
+
+# Ignore mesh files
+*.ply
+*.obj
+*.mtl

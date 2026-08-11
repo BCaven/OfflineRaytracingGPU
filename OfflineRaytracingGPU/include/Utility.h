@@ -3,6 +3,15 @@
 #include "VulkanHelper.h"
 
 constexpr float PI = 3.1415926535;
+constexpr int SH_COUNT = 16;
+constexpr int SH_CHANNEL_COUNT = 3;
+constexpr int SH_FLOAT_COUNT = SH_COUNT * SH_CHANNEL_COUNT;
+constexpr int SH_REST_FLOAT_COUNT = SH_FLOAT_COUNT - SH_CHANNEL_COUNT;
+constexpr int SH_PACKED_VEC4_COUNT = SH_FLOAT_COUNT / 4;
+
+static_assert(SH_FLOAT_COUNT % 4 == 0,
+	"Spherical harmonic coefficients must pack into vec4 attributes");
+
 
 struct CameraWrapper
 {
@@ -25,12 +34,20 @@ struct Camera
 	float fov;
 };
 
+struct Ray
+{
+	glm::vec3 origin;
+	glm::vec3 direction;
+	glm::vec4 scatter;
+	glm::vec4 emission;
+};
+
 // TODO: later this will be removed since the BVH will exclusively be on the GPU
 enum PrimType
 {
-	MATERIAL,
 	SPHERE,
 	TRIANGLE,
+	GAUSSIAN_SPLAT,
 	BVH_NODE,
 	EMPTY
 };
@@ -51,6 +68,24 @@ struct Material
 	glm::vec4 color;
 	float metallicOrIor;
 	glm::vec4 emissiveColor = glm::vec4(0);
+	int SHIndex = -1;
+};
+
+struct GaussianSplat
+{
+	glm::vec3 center;
+	glm::mat3x3 invSigma;
+	glm::mat3x3 rotation;
+	glm::vec3 invScale2;
+	float alpha;
+	unsigned int materialIndex;
+	glm::vec3 halfExtent;
+};
+
+struct SphericalHarmonic
+{
+	glm::vec3 sh[SH_COUNT];
+	int degree = 0;
 };
 
 struct Sphere
@@ -78,6 +113,8 @@ struct ShaderData
 	glm::vec4 backgroundColor = glm::vec4(0.3, 0.5, 1.0, 1.0);
 	Camera camera;
 	unsigned int bvhRoot;
+	bool resetRays;
+	glm::vec3 camDir;
 };
 struct ShaderDataBuffer 
 {
@@ -133,7 +170,6 @@ static inline void chk(bool result)
 		exit(result);
 	}
 }
-
 
 static inline uint64_t separate_bits_64(uint64_t n)
 {
@@ -205,3 +241,92 @@ static inline int BuildBVHRecursive(std::vector<bvhNode>& nodes, int begin, int 
 	nodes.push_back(parent);
 	return nodes.size() - 1;
 }
+
+
+namespace plyDetail {
+
+	struct Property {
+		std::string name;
+		std::string type;
+		std::size_t offset = 0;
+		std::size_t size = 0;
+	};
+
+	inline std::size_t scalarSize(const std::string& type) {
+		if (type == "char" || type == "uchar" || type == "int8" || type == "uint8") {
+			return 1;
+		}
+		if (type == "short" || type == "ushort" || type == "int16" || type == "uint16") {
+			return 2;
+		}
+		if (type == "int" || type == "uint" || type == "float" || type == "int32" || type == "uint32" ||
+			type == "float32") {
+			return 4;
+		}
+		if (type == "double" || type == "float64") {
+			return 8;
+		}
+		throw std::runtime_error("Unsupported PLY scalar type: " + type);
+	}
+
+	template <typename T> inline T readScalar(const unsigned char* bytes) {
+		T value;
+		std::memcpy(&value, bytes, sizeof(T));
+		return value;
+	}
+
+	inline float readAsFloat(const std::vector<unsigned char>& row, const Property& property) {
+		const unsigned char* ptr = row.data() + property.offset;
+		const std::string& type = property.type;
+
+		if (type == "float" || type == "float32")
+			return readScalar<float>(ptr);
+		if (type == "double" || type == "float64")
+			return static_cast<float>(readScalar<double>(ptr));
+		if (type == "char" || type == "int8")
+			return static_cast<float>(readScalar<std::int8_t>(ptr));
+		if (type == "uchar" || type == "uint8")
+			return static_cast<float>(readScalar<std::uint8_t>(ptr));
+		if (type == "short" || type == "int16")
+			return static_cast<float>(readScalar<std::int16_t>(ptr));
+		if (type == "ushort" || type == "uint16")
+			return static_cast<float>(readScalar<std::uint16_t>(ptr));
+		if (type == "int" || type == "int32")
+			return static_cast<float>(readScalar<std::int32_t>(ptr));
+		if (type == "uint" || type == "uint32")
+			return static_cast<float>(readScalar<std::uint32_t>(ptr));
+
+		throw std::runtime_error("Unsupported PLY scalar type: " + type);
+	}
+
+	inline std::vector<std::string> splitWords(const std::string& line) {
+		std::vector<std::string> words;
+		std::string word;
+		for (char c : line) {
+			if (c == ' ' || c == '\t' || c == '\r') {
+				if (!word.empty()) {
+					words.push_back(word);
+					word.clear();
+				}
+			}
+			else {
+				word.push_back(c);
+			}
+		}
+		if (!word.empty()) {
+			words.push_back(word);
+		}
+		return words;
+	}
+
+	inline const Property& requireProperty(const std::unordered_map<std::string, std::size_t>& lookup,
+		const std::vector<Property>& properties,
+		const std::string& name) {
+		auto it = lookup.find(name);
+		if (it == lookup.end()) {
+			throw std::runtime_error("Missing required vertex property: " + name);
+		}
+		return properties[it->second];
+	}
+
+} // namespace plyDetail

@@ -23,6 +23,8 @@ struct ShaderData
     float4 backgroundColor;
     Camera camera;
     uint bvhRoot;
+    bool resetRays;
+    float3 camDir;
 };
 
 // accumulation of previous samples
@@ -40,4 +42,6 @@ struct VSOutput
     float4 backgroundColor;
     Camera camera;
     uint bvhRoot;
+    bool resetRays;
+    float3 camDir;
 };
