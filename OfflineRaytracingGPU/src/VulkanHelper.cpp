@@ -42,24 +42,39 @@ int main()
 			Material{ pastel_purple, 0, light_purple},
 			Material{ pastel_orange, 0},
 			Material{ pastel_grey, 0 }
-
 	};
 
-	wrapper.spheres = {
-		//Sphere(glm::vec3(0, -1001.5, 0), 1000, 5),
-	};
 	float radius = 13;
 	float offset = radius / 2;
-	for (float r = 0; r < PI * 2; r+=PI / 8)
+	for (float r = 10; r < PI * 2; r+=PI / 8)
 	{
 		wrapper.spheres.push_back(
-			Sphere{  glm::vec3( offset + (std::sin(r) * radius), -3, offset + (std::cos(r) * radius)), 2, (unsigned int) rand(gen)}
+			Sphere{  glm::vec3( offset + (std::sin(r) * radius), rand(gen), offset + (std::cos(r) * radius)), 2, (unsigned int)rand(gen)}
 		);
 	}
+	wrapper.spheres.push_back(
+		Sphere{ glm::vec3(0, 0, 5), 1, 3 }
+	);
 
-	wrapper.loadObj("assets/suzanne.obj", 5);
+	int suzanneIndex = wrapper.loadObj("assets/suzanne.obj", 5);
+	//int beholderIndex = wrapper.loadObj("assets/beholder.obj", 5);
+	//wrapper.validateBVH(beholderIndex);
+	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, beholderIndex);
+	//int readingroomIndex = wrapper.loadSplat("assets/readingroom_20x_180.ply");
 
-	wrapper.loadSplat("assets/readingroom_20x_180.ply");
+	//int tomatoIndex = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
+	//std::cout << "Tomato BVH (root node: " << tomatoIndex << ")\n";
+	//wrapper.printBVH(tomatoIndex, 2);
+	//wrapper.validateBVH(tomatoIndex);
+	for (float i = 0; i < 360; i += 45)
+	{
+		wrapper.loadTransform(glm::vec3(2 * (i / 45.f), 0, 0), glm::vec3(0, i, 0), glm::vec3(1), PrimType::BVH_NODE, suzanneIndex);
+	}
+
+	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, readingroomIndex);
+	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
+	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
+
 
 	std::cout << "Number of splats: " << wrapper.splats.size() << "\n";
 
@@ -70,217 +85,14 @@ int main()
 
 	wrapper.shaderData.backgroundColor = sky;
 
+	int root = wrapper.loadBVH();
+	std::cout << "TLAS BVH (root node: " << root << ")\n";
 
-	// build bvh
-	/*
-	struct bvhNode
-	{
-		glm::vec3 min;
-		glm::vec3 max;
-		uint32_t mortonCode;
-		PrimType rightPrim;
-		PrimType leftPrim;
-		int leftIndex;
-		int rightIndex;
-	}
-	*/
-	// get scene bounds
-	glm::vec3 sceneMin(FLT_MAX);
-	glm::vec3 sceneMax(-FLT_MAX);
+	wrapper.printBVH(root, 3);
 
-	for (const auto& sphere : wrapper.spheres)
-	{
-		sceneMin = make_aabb_min(sceneMin, sphere.center - sphere.radius);
-		sceneMax = make_aabb_max(sceneMax, sphere.center + sphere.radius);
-	}
-	for (const auto& tri : wrapper.triangles)
-	{
-		glm::vec3 triMin = make_aabb_min(
-			make_aabb_min(tri.v0, tri.v1),
-			tri.v2);
-
-		glm::vec3 triMax = make_aabb_max(
-			make_aabb_max(tri.v0, tri.v1),
-			tri.v2);
-
-		sceneMin = make_aabb_min(sceneMin, triMin);
-		sceneMax = make_aabb_max(sceneMax, triMax);
-	}
-	for (const auto& splat : wrapper.splats)
-	{
-		glm::vec3 splatMin = splat.center - splat.halfExtent;
-		glm::vec3 splatMax = splat.center + splat.halfExtent;
-		sceneMin = make_aabb_min(sceneMin, splatMin);
-		sceneMax = make_aabb_max(sceneMax, splatMax);
-	}
-
-	glm::vec3 invSceneExtent = 1.f / make_aabb_max(sceneMax - sceneMin, glm::vec3(1e-8));
-
-
-	std::vector<bvhNode>& bvhNodes = wrapper.bvhNodes;
-	for (size_t i = 0; i < wrapper.spheres.size(); i+=2)
-	{
-		if (i + 1 < wrapper.spheres.size())
-		{
-			const auto& s0 = wrapper.spheres[i];
-			const auto& s1 = wrapper.spheres[i + 1];
-
-			glm::vec3 min = make_aabb_min(s0.center - s0.radius, s1.center - s1.radius);
-			glm::vec3 max = make_aabb_max(s0.center + s0.radius, s1.center + s1.radius);
-
-			glm::vec3 center = (min + max) * 0.5f;
-			
-
-			bvhNodes.push_back(bvhNode{
-				.min = min,
-				.max = max,
-				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
-				.rightPrim = PrimType::SPHERE,
-				.leftPrim = PrimType::SPHERE,
-				.leftIndex = (int) i,
-				.rightIndex = (int) i + 1,
-				});
-		}
-		else
-		{
-			const auto& s0 = wrapper.spheres[i];
-
-			glm::vec3 min = s0.center - s0.radius;
-			glm::vec3 max = s0.center + s0.radius;
-			glm::vec3 center = (min + max) * 0.5f;
-
-			bvhNodes.push_back(bvhNode{
-				.min = min,
-				.max = max,
-				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
-				.rightPrim = PrimType::EMPTY,
-				.leftPrim = PrimType::SPHERE,
-				.leftIndex = (int) i,
-				.rightIndex = -1,
-				});
-		}
-	}
-	for (size_t i = 0; i < wrapper.triangles.size(); i+=2)
-	{
-		if (i + 1 < wrapper.triangles.size())
-		{
-			const auto& t0 = wrapper.triangles[i];
-			const auto& t1 = wrapper.triangles[i + 1];
-
-			glm::vec3 max = make_aabb_max(make_aabb_max(t0.v0, t0.v1), t0.v2);
-			glm::vec3 min = make_aabb_min(make_aabb_min(t0.v0, t0.v1), t0.v2);
-			max = make_aabb_max(max, make_aabb_max(make_aabb_max(t1.v0, t1.v1), t1.v2));
-			min = make_aabb_min(min, make_aabb_min(make_aabb_min(t1.v0, t1.v1), t1.v2));
-
-			max += 0.001f;
-			min -= 0.001f;
-			glm::vec3 center = (min + max) * 0.5f;
-
-			bvhNodes.push_back(bvhNode{
-				.min = min,
-				.max = max,
-				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
-				.rightPrim = PrimType::TRIANGLE,
-				.leftPrim = PrimType::TRIANGLE,
-				.leftIndex = (int) i,
-				.rightIndex = (int) i + 1,
-				});
-		}
-		else
-		{
-			const auto& t0 = wrapper.triangles[i];
-
-			glm::vec3 max = make_aabb_max(make_aabb_max(t0.v0, t0.v1), t0.v2);
-			glm::vec3 min = make_aabb_min(make_aabb_min(t0.v0, t0.v1), t0.v2);
-			
-			max += 0.001f;
-			min -= 0.001f;
-			glm::vec3 center = (min + max) * 0.5f;
-
-			bvhNodes.push_back(bvhNode{
-				.min = min,
-				.max = max,
-				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
-				.rightPrim = PrimType::EMPTY,
-				.leftPrim = PrimType::TRIANGLE,
-				.leftIndex = (int)i,
-				.rightIndex = -1,
-				});
-		}
-	}
-	for (size_t i = 0; i < wrapper.splats.size(); i += 2)
-	{
-		if (i + 1 < wrapper.splats.size())
-		{
-			const auto& s0 = wrapper.splats[i];
-			const auto& s1 = wrapper.splats[i + 1];
-
-			glm::vec3 min = make_aabb_min(s0.center - s0.halfExtent, s1.center - s1.halfExtent);
-			glm::vec3 max = make_aabb_max(s0.center + s0.halfExtent, s1.center + s1.halfExtent);
-
-			glm::vec3 center = (min + max) * 0.5f;
-
-
-			bvhNodes.push_back(bvhNode{
-				.min = min,
-				.max = max,
-				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
-				.rightPrim = PrimType::GAUSSIAN_SPLAT,
-				.leftPrim = PrimType::GAUSSIAN_SPLAT,
-				.leftIndex = (int)i,
-				.rightIndex = (int)i + 1,
-				});
-		}
-		else
-		{
-			const auto& s0 = wrapper.splats[i];
-
-			glm::vec3 min = s0.center - s0.halfExtent;
-			glm::vec3 max = s0.center + s0.halfExtent;
-			glm::vec3 center = (min + max) * 0.5f;
-
-			bvhNodes.push_back(bvhNode{
-				.min = min,
-				.max = max,
-				.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent),
-				.rightPrim = PrimType::EMPTY,
-				.leftPrim = PrimType::GAUSSIAN_SPLAT,
-				.leftIndex = (int)i,
-				.rightIndex = -1,
-				});
-		}
-	}
-
-	// sort them by morton code
-	std::sort(
-		bvhNodes.begin(),
-		bvhNodes.end(),
-		[](const bvhNode& a, const bvhNode& b)
-		{
-			return a.mortonCode < b.mortonCode;
-		}
-	);
-
-	
-
-	// build parent nodes
-	int root = BuildBVHRecursive(bvhNodes, 0, bvhNodes.size());
-
-	std::cout << "Bvh root index: " << root << " total size: " << wrapper.bvhNodes.size() << "\n";
-	/*
-	for (const auto& node : bvhNodes)
-	{
-		std::cout <<
-			"Bvh Node l_index: " << node.leftIndex <<
-			" r_index: " << node.rightIndex <<
-			" l_type: " << node.leftPrim <<
-			" r_type: " << node.rightPrim <<
-			"\n";
-	}
-	*/
 	wrapper.init();
-	wrapper.shaderData.bvhRoot = root;
 
+	wrapper.shaderData.bvhRoot = root;
 	bool running = true;
 	while (running)
 	{

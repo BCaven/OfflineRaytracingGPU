@@ -25,6 +25,7 @@ VSOutput main(VSInput input, uniform ShaderData *shaderData, uint instanceIndex 
     output.backgroundColor = shaderData.backgroundColor;
     output.bvhRoot = shaderData.bvhRoot;
     output.resetRays = shaderData.resetRays;
+    output.bounceCount = shaderData.bounceCount;
     output.camDir = shaderData.camDir;
     return output;
 }
@@ -34,7 +35,8 @@ VSOutput main(VSInput input, uniform ShaderData *shaderData, uint instanceIndex 
 [shader("fragment")]
 float4 main(VSOutput input)
 {
-    init_rng(input.Pos.xy, input.windowMax.x, input.frameCount);
+    // TODO: the shader actually has no idea what the max bounce count is :)
+    init_rng(input.Pos.xy, input.windowMax.x, (input.frameCount * 10) + input.bounceCount);
     backgroundColor = input.backgroundColor;
     int rayIndex = (int)(input.Pos.x + (input.Pos.y * input.windowMax.x));
 
@@ -55,9 +57,8 @@ float4 main(VSOutput input)
         reset_ray(rayIndex, origin, direction);
     }
 
-    Ray ray = rays[rayIndex];
-    float4 radianceSample = ray_color(rayIndex, input.bvhRoot, input.camDir);
-    
+    bool lambertianLighting = input.resetRays && input.frameCount == 0;
+    float4 radianceSample = ray_color(rayIndex, input.bvhRoot, input.camDir, lambertianLighting);
     
     // TODO remove this redundant calc
     float2 uv = input.Pos.xy / input.windowMax;

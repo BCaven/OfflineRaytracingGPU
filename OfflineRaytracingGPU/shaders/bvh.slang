@@ -1,6 +1,6 @@
 #include "bvh_header.slang"
 
-public static float4 backgroundColor = float4(1);
+public static float4 backgroundColor = float4(0);
 
 public StructuredBuffer<Sphere> spheres;
 public StructuredBuffer<Triangle> triangles;
@@ -8,11 +8,12 @@ public StructuredBuffer<GaussianSplat> splats;
 public StructuredBuffer<SphericalHarmonic> shMats;
 public StructuredBuffer<Material> materials;
 public StructuredBuffer<bvhNode> bvhNodes;
+public StructuredBuffer<Transform> transforms;
 public RWStructuredBuffer<Ray> rays;
 
 public void reset_ray(int rayIndex, float3 origin, float3 direction)
 {
-    rays[rayIndex] = Ray(origin, direction, float4(1), float4(0));
+    rays[rayIndex] = Ray(origin, direction, float4(1), float4(0), 1.f / direction);
 }
 
 public void init_rng(float2 pixel, int windowWidth, int frameCount)
@@ -211,7 +212,7 @@ void scatter(int rayIndex, Intersection hit, Material material, float3 camDir)
         scattered = sample_lamberian(N);
     }
 
-    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered, input_ray.scatter * attenuation, input_ray.emission + material.emissiveColor);
+    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered, input_ray.scatter * attenuation, input_ray.emission + material.emissiveColor, 1.f / scattered);
 
     rays[rayIndex] = outputRay;
 };
@@ -233,10 +234,10 @@ bool valid_intersection(Intersection hit)
 float4 sky_color(Ray ray)
 {
     float t = 0.5 * (normalize(ray.direction).y + 1.0);
-    return (1 - t) * float4(1) + t * backgroundColor;
+    return backgroundColor; //(1 - t) * float4(1) + t * backgroundColor;
 }
 
-Intersection intersect_sphere(Ray ray, Sphere sphere)
+Intersection intersect_sphere(const Ray ray, Sphere sphere)
 {
     float3 v = sphere.center - ray.origin;
     float a = dot(ray.direction, ray.direction);
@@ -261,7 +262,7 @@ Intersection intersect_sphere(Ray ray, Sphere sphere)
     return Intersection(N, t, sphere.materialIndex);
 }
 
-Intersection intersect_triangle(Ray ray, Triangle tri)
+Intersection intersect_triangle(const Ray ray, Triangle tri)
 {
     float normalDotDir = dot(tri.normal, ray.direction);
     if (abs(normalDotDir) < EPSILON) return no_intersection();
@@ -293,7 +294,7 @@ Intersection intersect_triangle(Ray ray, Triangle tri)
     return Intersection(tri.normal, t, tri.materialIndex);
 }
 
-Intersection intersect_splat(Ray ray, GaussianSplat gs, float closest_t)
+Intersection intersect_splat(const Ray ray, GaussianSplat gs, float closest_t)
 {
     float3 w = ray.direction;
     float3 X = ray.origin - gs.center;
@@ -331,45 +332,24 @@ Intersection intersect_splat(Ray ray, GaussianSplat gs, float closest_t)
     return Intersection(normal, mean_t, gs.materialIndex);
 }
 
-float2 aabb_bounds(Ray ray, float3 min, float3 max)
+float2 aabb_bounds(Ray ray, float3 aabb_min, float3 aabb_max)
 {
-    float ray_t_min = -FLT_MAX;
-    float ray_t_max = FLT_MAX;
-    for (uint axis = 0; axis < 3; axis++)
-    {
-        const float ax_min = min[axis];
-        const float ax_max = max[axis];
-        const float adinv = 1. / ray.direction[axis];
-        float t0 = (ax_min - ray.origin[axis]) * adinv;
-        float t1 = (ax_max - ray.origin[axis]) * adinv;
-        if (t0 < t1)
-        {
-            if (t0 > ray_t_min) ray_t_min = t0;
-            if (t1 < ray_t_max) ray_t_max = t1;
-        }
-        else
-        {
-            if (t1 > ray_t_min) ray_t_min = t1;
-            if (t0 < ray_t_max) ray_t_max = t0;
-        }
+    float3 t0 = (aabb_min - ray.origin) * ray.invDir;
+    float3 t1 = (aabb_max - ray.origin) * ray.invDir;
+    float3 tMin = min(t0, t1);
+    float3 tMax = max(t0, t1);
 
-        if (ray_t_max <= ray_t_min)
-        {
-            return float2(FLT_MAX);
-        }
-    }
-    if (ray_t_min > EPSILON)
-    {
-        return float2(ray_t_min, ray_t_max);
-    }
-    else if (ray_t_max > EPSILON)
-    {
-        return float2(EPSILON, ray_t_max);
-    }
-    return float2(FLT_MAX);
+    float tNear = max(max(tMin.x, tMin.y), tMin.z);
+    float tFar = min(min(tMax.x, tMax.y), tMax.z);
+
+    float tHit = max(tNear, EPSILON);
+
+    bool valid = tFar >= tHit;
+
+    return valid ? float2(tHit, tFar) : float2(FLT_MAX);
 }
 
-float intersect_aabb(Ray ray, bvhNode bvh)
+float intersect_aabb(Ray ray, bvhChild bvh)
 {
     float2 bounds = aabb_bounds(ray, bvh.min, bvh.max);
     return bounds.x;
@@ -379,7 +359,8 @@ void ProcessPrimitive(
     PrimType type,
     int index,
     Ray ray,
-    inout Intersection closest)
+    inout Intersection closest,
+    TraversalNode node)
 {
     Intersection hit = no_intersection();
 
@@ -397,107 +378,156 @@ void ProcessPrimitive(
         hit = intersect_triangle(ray, triangles[index]);
         break;
     case PrimType::GAUSSIAN_SPLAT:
-        hit = intersect_splat(ray, splats[index], closest.t);
+        hit = intersect_splat(ray, splats[index], closest.t / node.tScale);
         break;
     default:
         return;
     }
-
-    if (hit.t > 0 && hit.t < closest.t)
+    if (hit.t > 0 && hit.t * node.tScale < closest.t)
     {
+        // leaving this out for now
+        hit.normal = normalize(mul(node.normalMatrix, hit.normal));
+        hit.t *= node.tScale;
         closest = hit;
     }
 }
 
-void push_stack(inout uint stack[64],
+void push_stack(inout TraversalNode stack[STACK_SIZE],
                 inout uint stackPtr,
-                uint index)
+                TraversalNode item)
 {
-    if (stackPtr < 64)
+    if (stackPtr < STACK_SIZE)
     {
-        stack[stackPtr++] = index;
+        stack[stackPtr++] = item;
     }
 }
 
-Intersection intersect_scene_bvh(Ray ray, uint rootIndex)
+bool transformRay(TraversalNode node, Transform t, out TraversalNode result)
+{
+    float3 localOrigin = mul(t.invMatrix, float4(node.ray.origin, 1.f)).xyz;
+    float3 localDirection = mul((float3x3) t.invMatrix, node.ray.direction);
+
+    float directionLength = length(localDirection);
+    if (directionLength < EPSILON)
+    {
+        // bad transform, this should never happen. Is here for debugging
+        result = TraversalNode();
+        return false;
+    }
+    Ray transformedRay = node.ray;
+    float3 dir = localDirection / directionLength;
+    transformedRay.origin = localOrigin;
+    transformedRay.direction = dir;
+    transformedRay.invDir = 1. / dir;
+    float3x3 newNormalMatrix = mul(node.normalMatrix, transpose((float3x3)t.invMatrix));
+    result = TraversalNode(t.childIndex, transformedRay, node.tScale / directionLength, newNormalMatrix);
+    return true;
+}
+
+void processChild(inout TraversalNode stack[STACK_SIZE], inout uint stackPtr, TraversalNode node, inout Intersection closest, bvhChild child)
+{
+    if (child.index < 0) 
+    {
+        // oops!
+        return;
+    }
+    if (child.type == PrimType::BVH_NODE)
+    {
+        TraversalNode childNode = TraversalNode(child.index, node.ray, node.tScale);
+        push_stack(stack, stackPtr, childNode);
+    }
+    else if (child.type == PrimType::TRANSFORM)
+    {
+        // Assume TRANSFORMs can *only* hold BVH_NODE
+        Transform t = transforms[child.index];
+        TraversalNode resolved;
+        
+        // the transformed BVH node
+        if (transformRay(node, t, resolved))
+        {
+            push_stack(stack, stackPtr, resolved);
+        }        
+    }
+    else
+    {
+        ProcessPrimitive(child.type, child.index, node.ray, closest, node);
+    }
+
+}
+
+Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
 {
     // TODO: try this using a Rope / threaded BVH later
     /*
     push root
     closest.t = FLT_MAX
     while stack not empty:
-        node = pop()
-        test left child
-        test right child
-        push BVH children
-        test left prim
-        test right prim
+        if TRANSFORM:
+            push transformed TraversalNode
+        if BVH_NODE:
+            check children
+            potentially push children
     return closest
     */
-    uint stack[64];
+    const uint MAX_TRAVERSALS = 20000;
+    uint iterations = 0;
+    TraversalNode root = TraversalNode(rootIndex, rays[rayIndex], 1.f);
+
+    TraversalNode stack[STACK_SIZE];
     uint stackPtr = 0;
 
-    stack[stackPtr++] = rootIndex;
+    stack[stackPtr++] = root;
 
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
 
-    while (stackPtr > 0)
+    while (stackPtr > 0 && iterations < MAX_TRAVERSALS)
     {
-        uint nodeIndex = stack[--stackPtr];
-        const bvhNode current = bvhNodes[nodeIndex];
+        iterations++;
+        TraversalNode node = stack[--stackPtr];
+        
+        Ray ray = node.ray;
+
+        const bvhNode current = bvhNodes[node.index];
 
         float leftT = FLT_MAX;
+        if (current.left.type != PrimType::EMPTY)
+        {
+            leftT = node.tScale * intersect_aabb(ray, current.left);
+        }
         float rightT = FLT_MAX;
-
-        if (current.leftPrim == PrimType::BVH_NODE)
+        if (current.right.type != PrimType::EMPTY)
         {
-            leftT = intersect_aabb(ray, bvhNodes[current.leftIndex]);
+            rightT = node.tScale * intersect_aabb(ray, current.right);
         }
-        else
-        {
-            ProcessPrimitive(current.leftPrim, current.leftIndex, ray, closest);
-        }
-
-        if (current.rightPrim == PrimType::BVH_NODE)
-        {
-            rightT = intersect_aabb(ray, bvhNodes[current.rightIndex]);
-        }
-        else
-        {
-            ProcessPrimitive(current.rightPrim, current.rightIndex, ray, closest);
-        }
-
-
         if (leftT < rightT)
         {
+            // push far child first
             if (rightT < closest.t)
             {
-                push_stack(stack, stackPtr, current.rightIndex);
+                processChild(stack, stackPtr, node, closest, current.right);
             }
-
             if (leftT < closest.t)
             {
-                push_stack(stack, stackPtr, current.leftIndex);
+                processChild(stack, stackPtr, node, closest, current.left);
             }
         }
         else
         {
             if (leftT < closest.t)
             {
-                push_stack(stack, stackPtr, current.leftIndex);
+                processChild(stack, stackPtr, node, closest, current.left);
             }
             if (rightT < closest.t)
             {
-                push_stack(stack, stackPtr, current.rightIndex);
+                processChild(stack, stackPtr, node, closest, current.right);
             }
         }
     }
-
     return closest;
 }
 
-public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir)
+public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBounceDebug)
 {
     Ray ray = rays[rayIndex];
     float4 throughputScatter = ray.scatter;
@@ -505,7 +535,7 @@ public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir)
     float4 radianceSample = throughputScatter * throughputEmission;
     
     // TODO: obv this fails if there is no BVH
-    Intersection intersection = intersect_scene_bvh(ray, bvhRoot);
+    Intersection intersection = intersect_scene_bvh(rayIndex, bvhRoot);
     if (!valid_intersection(intersection))
     {
         return throughputScatter * (throughputEmission + sky_color(ray));
@@ -514,6 +544,14 @@ public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir)
 
     scatter(rayIndex, intersection, material, camDir);
     ray = rays[rayIndex];
+
+    if (firstBounceDebug)
+    {
+        // maybe do lambertian shading?
+        // or depth? XD
+        //float light = dot(intersection.normal, float3(0, 1, 0));
+        return ray.scatter;
+    }
 
     return ray.emission * ray.scatter; 
 }

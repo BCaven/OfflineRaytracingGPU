@@ -5,6 +5,8 @@ public static const float EPSILON = 1e-3;
 public static const float TWO_PI = 6.2831853;
 public static const float4 GLASS_F0 = float4(0.04);
 
+static const uint STACK_SIZE = 128;
+
 public static const float SPLAT_CUTOFF = 8.;
 public static const int SH_COUNT = 16;
 
@@ -42,6 +44,7 @@ public struct Ray
     public float3 direction;
     public float4 scatter;
     public float4 emission;
+    public float3 invDir;
 };
 
 struct Intersection
@@ -100,17 +103,39 @@ public enum PrimType
     SPHERE,
     TRIANGLE,
     GAUSSIAN_SPLAT,
+    TRANSFORM,
     BVH_NODE,
     EMPTY
 };
 
 public struct bvhNode
 {
+    uint64_t mortonCode;
+    bvhChild left;
+    bvhChild right;
+};
+
+struct bvhChild
+{
     float3 min;
     float3 max;
-    uint64_t mortonCode;
-    PrimType rightPrim;
-    PrimType leftPrim;
-    int leftIndex;
-    int rightIndex;
+    PrimType type;
+    int index;
+};
+
+public struct Transform
+{
+    float4x4 matrix;
+    float4x4 invMatrix;
+    PrimType childPrim;
+    int childIndex;
+}
+
+struct TraversalNode
+{
+    uint index;
+    Ray ray;
+    float tScale;
+    float3x3 normalMatrix = float3x3(1);
+
 }

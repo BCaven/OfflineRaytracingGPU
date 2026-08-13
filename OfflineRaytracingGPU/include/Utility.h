@@ -40,6 +40,7 @@ struct Ray
 	glm::vec3 direction;
 	glm::vec4 scatter;
 	glm::vec4 emission;
+	glm::vec3 invDir;
 };
 
 // TODO: later this will be removed since the BVH will exclusively be on the GPU
@@ -48,20 +49,27 @@ enum PrimType
 	SPHERE,
 	TRIANGLE,
 	GAUSSIAN_SPLAT,
+	TRANSFORM,
 	BVH_NODE,
 	EMPTY
 };
 
-struct bvhNode
+struct bvhChild
 {
 	glm::vec3 min;
 	glm::vec3 max;
-	uint64_t mortonCode;
-	PrimType rightPrim;
-	PrimType leftPrim;
-	int leftIndex;
-	int rightIndex;
+	PrimType type;
+	int index;
 };
+
+struct bvhNode
+{
+	uint64_t mortonCode;
+	bvhChild left;
+	bvhChild right;
+};
+
+
 
 struct Material
 {
@@ -87,6 +95,15 @@ struct SphericalHarmonic
 	glm::vec3 sh[SH_COUNT];
 	int degree = 0;
 };
+
+struct Transform
+{
+	glm::mat4 matrix;
+	glm::mat4 invMatrix;
+	PrimType childPrim;
+	int childIndex;
+};
+
 
 struct Sphere
 {
@@ -115,6 +132,7 @@ struct ShaderData
 	unsigned int bvhRoot;
 	bool resetRays;
 	glm::vec3 camDir;
+	int bounceCount;
 };
 struct ShaderDataBuffer 
 {
@@ -158,16 +176,15 @@ struct StructuredBufferBinding
 static inline void chk(VkResult result) 
 {
 	if (result != VK_SUCCESS) {
-		std::cerr << "Vulkan call returned an error (" << result << ")\n";
-		exit(result);
+		std::cerr << "Vulkan error: " << result << "\n";
+		throw std::runtime_error("Vulkan call returned an error");
 	}
 }
 
 static inline void chk(bool result) 
 {
 	if (!result) {
-		std::cerr << "Call returned an error\n";
-		exit(result);
+		throw std::runtime_error("Call returned error!");
 	}
 }
 
@@ -231,17 +248,23 @@ static inline int BuildBVHRecursive(std::vector<bvhNode>& nodes, int begin, int 
 	int right = BuildBVHRecursive(nodes, mid, end);
 
 	bvhNode parent{
-		.min = make_aabb_min(nodes[left].min, nodes[right].min),
-		.max = make_aabb_max(nodes[left].max, nodes[right].max),
-		.rightPrim = PrimType::BVH_NODE,
-		.leftPrim = PrimType::BVH_NODE,
-		.leftIndex = left,
-		.rightIndex = right
+		// morton code doesnt matter here since interior nodes arent sorted
+		.left = bvhChild{
+			.min = make_aabb_min(nodes[left].left.min, nodes[left].right.min),
+			.max = make_aabb_max(nodes[left].left.max, nodes[left].right.max),
+			.type = PrimType::BVH_NODE,
+			.index = left
+		},
+		.right = bvhChild{
+			.min = make_aabb_min(nodes[right].left.min, nodes[right].right.min),
+			.max = make_aabb_max(nodes[right].left.max, nodes[right].right.max),
+			.type = PrimType::BVH_NODE,
+			.index = right
+		}
 	};
 	nodes.push_back(parent);
 	return nodes.size() - 1;
 }
-
 
 namespace plyDetail {
 

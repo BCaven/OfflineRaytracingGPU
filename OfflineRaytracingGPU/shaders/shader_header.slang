@@ -25,6 +25,7 @@ struct ShaderData
     uint bvhRoot;
     bool resetRays;
     float3 camDir;
+    int bounceCount;
 };
 
 // accumulation of previous samples
@@ -44,4 +45,5 @@ struct VSOutput
     uint bvhRoot;
     bool resetRays;
     float3 camDir;
+    int bounceCount;
 };
