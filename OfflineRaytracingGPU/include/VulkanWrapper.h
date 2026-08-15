@@ -990,7 +990,7 @@ public:
 		// Pipeline
 		VkPushConstantRange pushConstantRange{
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.size = sizeof(VkDeviceAddress)
+			.size = sizeof(ShaderData)
 		};
 		VkPipelineLayoutCreateInfo pipelineLayoutCI{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -1976,6 +1976,7 @@ public:
 		shaderData.resetRays = firstBounce;
 		++bounces;
 		
+		ShaderData uploadedShaderData = shaderData;
 		memcpy(shaderDataBuffers[frameIndex].allocationInfo.pMappedData, &shaderData, sizeof(ShaderData));
 
 		if (finalBounce)
@@ -2156,8 +2157,8 @@ public:
 			pipelineLayout, 
 			VK_SHADER_STAGE_FRAGMENT_BIT, 
 			0, 
-			sizeof(VkDeviceAddress), 
-			&shaderDataBuffers[frameIndex].deviceAddress
+			sizeof(ShaderData),  // <- this use to be VKPointer
+			&uploadedShaderData // <- used to be pointer to buffer
 		);
 		vkCmdDrawIndexed(cb, indexCount, 1, 0, 0, 0);
 		vkCmdEndRendering(cb);

@@ -379,7 +379,8 @@ void ProcessPrimitive(
     int index,
     Ray ray,
     inout Intersection closest,
-    TraversalNode node)
+    TraversalNode node,
+    TransformStackNode transformNode)
 {
     Intersection hit = no_intersection();
 
@@ -397,25 +398,25 @@ void ProcessPrimitive(
         hit = intersect_triangle(ray, triangles[index]);
         break;
     case PrimType::GAUSSIAN_SPLAT:
-        hit = intersect_splat(ray, splats[index], closest.t / node.tScale);
+        hit = intersect_splat(ray, splats[index], closest.t / transformNode.tScale);
         break;
     default:
         return;
     }
-    if (hit.t > 0 && hit.t * node.tScale < closest.t)
+    if (hit.t > 0 && hit.t * transformNode.tScale < closest.t)
     {
         // TODO: rebuild the normal transformation matrix
         float3x3 normalMatrix = identity3x3();
 
-        for (uint i = 0; i < node.transformDepth; i++)
+        for (uint i = 0; i < transformNode.transformDepth; i++)
         {
-            float3x3 transformNormal = transpose((float3x3)transforms[node.transformChain[i]].invMatrix);
+            float3x3 transformNormal = transpose((float3x3)transforms[transformNode.transformChain[i]].invMatrix);
             normalMatrix = mul(normalMatrix, transformNormal);
         }
 
         float3 newNormal = normalize(mul(normalMatrix, hit.normal));
         hit.normal = newNormal;
-        hit.t *= node.tScale;
+        hit.t *= transformNode.tScale;
         closest = hit;
     }
 }
@@ -430,37 +431,57 @@ void push_stack(inout TraversalNode stack[STACK_SIZE],
     }
 }
 
-bool transformRay(TraversalNode node, uint transformIdx, Transform t, out TraversalNode result)
+void push_transform_stack(inout TransformStackNode stack[TRANSFORM_STACK_SIZE], inout uint transformStackPtr, TransformStackNode item)
 {
-    float3 localOrigin = mul(t.invMatrix, float4(node.rayOrigin, 1.f)).xyz;
-    float3 localDirection = mul((float3x3) t.invMatrix, node.rayDirection);
+    if (transformStackPtr < TRANSFORM_STACK_SIZE)
+    {
+        stack[transformStackPtr++] = item;
+    }
+}
+
+void releaseTransformEntry(inout TransformStackNode transformStack[TRANSFORM_STACK_SIZE], inout uint transformStackPtr, uint idx)
+{
+    transformStack[idx].nodesUsingThis--;
+    while (transformStackPtr > 0 && transformStack[transformStackPtr - 1].nodesUsingThis == 0)
+    {
+        transformStackPtr--;
+    }
+}
+
+bool transformRay(TraversalNode node, TransformStackNode transformNode, uint transformIdx, Transform t, out TraversalNode result, out TransformStackNode resultTransformStack)
+{
+    float3 localOrigin = mul(t.invMatrix, float4(transformNode.rayOrigin, 1.f)).xyz;
+    float3 localDirection = mul((float3x3) t.invMatrix, transformNode.rayDirection);
 
     float directionLength = length(localDirection);
     if (directionLength < EPSILON)
     {
         // bad transform, this should never happen. Is here for debugging
         result = TraversalNode();
+        resultTransformStack = TransformStackNode();
         return false;
     }
     float3 dir = localDirection / directionLength;
     result.index = t.childIndex;
-    result.rayOrigin = localOrigin;
-    result.rayDirection = localDirection / directionLength;
-    result.tScale = node.tScale / directionLength;
+    resultTransformStack.rayOrigin = localOrigin;
+    resultTransformStack.rayDirection = localDirection / directionLength;
+    resultTransformStack.tScale = transformNode.tScale / directionLength;
     result.tEntry = node.tEntry;
 
-    result.transformChain = node.transformChain;
-    if (node.transformDepth < MAX_TRANSFORM_DEPTH)
+    resultTransformStack.transformChain = transformNode.transformChain;
+    if (transformNode.transformDepth < MAX_TRANSFORM_DEPTH)
     {
-        result.transformChain[node.transformDepth] = transformIdx; // since this is the traversal node pointing to a transform
+        resultTransformStack.transformChain[transformNode.transformDepth] = transformIdx; // since this is the traversal node pointing to a transform
     }
-    result.transformDepth = min(node.transformDepth + 1, MAX_TRANSFORM_DEPTH);
+    resultTransformStack.transformDepth = min(transformNode.transformDepth + 1, MAX_TRANSFORM_DEPTH);
     return true;
 }
 
 void processChild(
     inout TraversalNode stack[STACK_SIZE], 
-    inout uint stackPtr, 
+    inout uint stackPtr,
+    inout TransformStackNode transformStack[TRANSFORM_STACK_SIZE],
+    inout uint transformStackPtr,
     TraversalNode node, 
     inout Intersection closest, 
     bvhChild child,
@@ -474,36 +495,49 @@ void processChild(
     }
     if (child.type == PrimType::BVH_NODE)
     {
+        // Dont push a new transform chain to the transform stack since we are just using the same one from before
         TraversalNode childNode;
         childNode.index = child.index;
-        childNode.rayOrigin = node.rayOrigin;
-        childNode.rayDirection = node.rayDirection;
-        childNode.tScale = node.tScale;
         childNode.tEntry = childT;
-        childNode.transformChain = node.transformChain;
-        childNode.transformDepth = node.transformDepth;
+        childNode.transformStackIndex = node.transformStackIndex;
+        transformStack[node.transformStackIndex].nodesUsingThis += 1;
+
+        // From when transform stacks were tied to the traversal stack
+        // childNode.rayOrigin = node.rayOrigin;
+        // childNode.rayDirection = node.rayDirection;
+        // childNode.tScale = node.tScale;
+        //childNode.transformChain = node.transformChain;
+        //childNode.transformDepth = node.transformDepth;
         push_stack(stack, stackPtr, childNode);
     }
     else if (child.type == PrimType::TRANSFORM)
     {
         // Assume TRANSFORMs can *only* hold BVH_NODE
         Transform t = transforms[child.index];
+        TransformStackNode transformStackNode = transformStack[node.transformStackIndex];
         TraversalNode resolved;
+        TransformStackNode resolvedStackNode;
         node.tEntry = childT;
         // the transformed BVH node
-        if (transformRay(node, child.index, t, resolved))
+        if (transformRay(node, transformStackNode, child.index, t, resolved, resolvedStackNode))
         {
+            resolvedStackNode.nodesUsingThis = 1;
+            uint newTransformIndex = transformStackPtr;
+            resolved.transformStackIndex = newTransformIndex;
+
             push_stack(stack, stackPtr, resolved);
+            push_transform_stack(transformStack, transformStackPtr, resolvedStackNode);
+            
         }        
     }
     else
     {
         Ray intersectionRay;
-        intersectionRay.direction = node.rayDirection;
-        intersectionRay.origin = node.rayOrigin;
-        ProcessPrimitive(child.type, child.index, intersectionRay, closest, node);
+        TransformStackNode currentTransform = transformStack[node.transformStackIndex];
+        intersectionRay.direction = currentTransform.rayDirection;
+        intersectionRay.origin = currentTransform.rayOrigin;
+        ProcessPrimitive(child.type, child.index, intersectionRay, closest, node, currentTransform);
     }
-
 }
 
 Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
@@ -524,14 +558,22 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
     Ray startRay = rays[rayIndex];
     TraversalNode root; // = TraversalNode(rootIndex, startRay.origin, startRay.direction, 1.f, 0.f);
     root.index = rootIndex;
-    root.rayOrigin = startRay.origin;
-    root.rayDirection = startRay.direction;
-    root.tScale = 1.f;
+    root.transformStackIndex = 0;
     root.tEntry = 0.f;
-    root.transformDepth = 0;
     TraversalNode stack[STACK_SIZE];
-    uint stackPtr = 0;
+    TransformStackNode transformStack[TRANSFORM_STACK_SIZE];
 
+    TransformStackNode identityTransform;
+    identityTransform.tScale = 1.f;
+    identityTransform.rayDirection = startRay.direction;
+    identityTransform.rayOrigin = startRay.origin;
+    identityTransform.transformDepth = 0;
+    identityTransform.nodesUsingThis = 1;
+
+    uint stackPtr = 0;
+    uint transformStackPtr = 0;
+
+    transformStack[transformStackPtr++] = identityTransform;
     stack[stackPtr++] = root;
 
     Intersection closest = no_intersection();
@@ -541,16 +583,19 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
     {
         iterations++;
         TraversalNode node = stack[--stackPtr];
+        TransformStackNode transformNode = transformStack[node.transformStackIndex];
+
         float tEntry = node.tEntry;
 
         if (tEntry >= closest.t)
         {
+            releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
             continue;
         }
 
         Ray intersectionRay;
-        intersectionRay.direction = node.rayDirection;
-        intersectionRay.origin = node.rayOrigin;
+        intersectionRay.direction = transformNode.rayDirection;
+        intersectionRay.origin = transformNode.rayOrigin;
 
         const bvhNode current = bvhNodes[node.index];
         bvhChild left = current.left;
@@ -558,36 +603,37 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
         float leftT = FLT_MAX;
         if (left.type != PrimType::EMPTY)
         {
-            leftT = node.tScale * intersect_aabb(intersectionRay, left);
+            leftT = transformNode.tScale * intersect_aabb(intersectionRay, left);
         }
         float rightT = FLT_MAX;
         if (right.type != PrimType::EMPTY)
         {
-            rightT = node.tScale * intersect_aabb(intersectionRay, right);
+            rightT = transformNode.tScale * intersect_aabb(intersectionRay, right);
         }
         if (leftT < rightT)
         {
             // push far child first
             if (rightT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, right, rightT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, right, rightT);
             }
             if (leftT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, left, leftT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, left, leftT);
             }
         }
         else
         {
             if (leftT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, left, leftT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, left, leftT);
             }
             if (rightT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, right, rightT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, right, rightT);
             }
         }
+        releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
     }
     return closest;
 }

@@ -6,10 +6,11 @@ public static const float TWO_PI = 6.2831853;
 public static const float4 GLASS_F0 = float4(0.04);
 
 static const uint STACK_SIZE = 64;
+static const uint TRANSFORM_STACK_SIZE = 24;
 
 public static const float SPLAT_CUTOFF = 8.;
 public static const int SH_COUNT = 16;
-public static const uint MAX_TRAVERSALS = 10000;
+public static const uint MAX_TRAVERSALS = 30000;
 
 public static const float SH_C0 = 0.28209479177387814f;
 public static const float SH_C1 = 0.4886025119029199f;
@@ -84,11 +85,11 @@ public struct Triangle
 public struct GaussianSplat
 {
     float3 center;
-    float3x3 rotation;
+    float3x3 rotation; // 
     float3 invScale2;
     float alpha;
     uint materialIndex;
-    float3 halfExtent;
+    float3 halfExtent; // CPU only - not needed by collision algorithm
 };
 
 public struct SphericalHarmonic
@@ -144,20 +145,23 @@ static const uint MAX_TRANSFORM_DEPTH = 4;
 struct TraversalNode
 {
     uint index;
-    float3 rayOrigin;
-    float3 rayDirection;
-    float tScale;
     float tEntry;
-    uint transformDepth = 0;
-    uint transformChain[MAX_TRANSFORM_DEPTH];
-    // uint transformStackIndex;
+    uint transformStackIndex;
+
+    // previously in the traversal node:
+    //float3 rayOrigin;
+    //float3 rayDirection;
+    //float tScale;
+    //uint transformDepth = 0;
+    //uint transformChain[MAX_TRANSFORM_DEPTH];
 }
 
-struct TransformStackNdoe
+struct TransformStackNode
 {
     float tScale;
     float3 rayOrigin;
     float3 rayDirection;
     uint transformDepth = 0;
     uint transformChain[MAX_TRANSFORM_DEPTH];
+    uint nodesUsingThis = 0;
 }

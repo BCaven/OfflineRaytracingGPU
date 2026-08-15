@@ -51,12 +51,12 @@ int main()
 			Material{ white, 0}							// 9
 	};
 
-	float radius = 13;
-	float offset = radius / 2;
+	float radius = 12;
+	float offset = 0; //radius / 2;
 	for (float r = 0; r < PI * 2; r+=PI / 8)
 	{
 		wrapper.spheres.push_back(
-			Sphere{  glm::vec3( offset + (std::sin(r) * radius), -3, offset + (std::cos(r) * radius)), 2, (unsigned int)rand(gen)}
+			Sphere{  glm::vec3( offset + (std::sin(r) * radius), -3, offset + (std::cos(r) * radius)), 3, (unsigned int)rand(gen)}
 		);
 	}
 	
@@ -71,7 +71,7 @@ int main()
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, beholderIndex);
 	//int readingroomIndex = wrapper.loadSplat("assets/readingroom_20x_180.ply");
 
-	//int tomatoIndex = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
+	int tomatoIndex = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
 	//std::cout << "Tomato BVH (root node: " << tomatoIndex << ")\n";
 	//wrapper.printBVH(tomatoIndex, 2);
 	//wrapper.validateBVH(tomatoIndex);
@@ -94,7 +94,7 @@ int main()
 	}
 
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, readingroomIndex);
-	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
+	wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 
