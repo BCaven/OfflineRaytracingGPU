@@ -30,31 +30,40 @@ int main()
 	glm::vec4 pastel_blue = glm::vec4(83, 236, 228, 255) / 255.0f;
 	glm::vec4 pastel_purple = glm::vec4(181, 150, 243, 255) / 255.0f;
 	glm::vec4 pastel_grey = glm::vec4(139, 157, 180, 255) / 255.f;
+	glm::vec4 red = glm::vec4(1, 0, 0, 1);
+	glm::vec4 green = glm::vec4(0, 1, 0, 1);
+	glm::vec4 white = glm::vec4(1);
+
 	glm::vec4 light_white = glm::vec4(10);
 	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
 	glm::vec4 sky = 10.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
-			Material{ pastel_orange, 1},
-			Material{ pastel_green, -1.5 },
-			Material{ pastel_blue, 0.5 },
-			Material{ pastel_purple, 0, light_white},
-			Material{ pastel_purple, 0, light_purple},
-			Material{ pastel_orange, 0},
-			Material{ pastel_grey, 0 }
+			Material{ pastel_orange, 1},				// 0
+			Material{ pastel_green, -1.5 },				// 1
+			Material{ pastel_blue, 0.5 },				// 2
+			Material{ pastel_purple, 0, light_white},	// 3
+			Material{ pastel_purple, 0, light_purple},	// 4
+			Material{ pastel_orange, 1},				// 5
+			Material{ pastel_grey, 0 },					// 6
+			Material{ red, 0},							// 7
+			Material{ green, 0},						// 8
+			Material{ white, 0}							// 9
 	};
 
 	float radius = 13;
 	float offset = radius / 2;
-	for (float r = 10; r < PI * 2; r+=PI / 8)
+	for (float r = 0; r < PI * 2; r+=PI / 8)
 	{
 		wrapper.spheres.push_back(
-			Sphere{  glm::vec3( offset + (std::sin(r) * radius), rand(gen), offset + (std::cos(r) * radius)), 2, (unsigned int)rand(gen)}
+			Sphere{  glm::vec3( offset + (std::sin(r) * radius), -3, offset + (std::cos(r) * radius)), 2, (unsigned int)rand(gen)}
 		);
 	}
-	wrapper.spheres.push_back(
-		Sphere{ glm::vec3(0, 0, 5), 1, 3 }
-	);
+	
+
+	int wallIndex_white = wrapper.loadObj("assets/plane.obj", 9);
+	int wallIndex_green = wrapper.loadObj("assets/plane.obj", 8);
+	int wallIndex_red = wrapper.loadObj("assets/plane.obj", 7);
 
 	int suzanneIndex = wrapper.loadObj("assets/suzanne.obj", 5);
 	//int beholderIndex = wrapper.loadObj("assets/beholder.obj", 5);
@@ -66,9 +75,22 @@ int main()
 	//std::cout << "Tomato BVH (root node: " << tomatoIndex << ")\n";
 	//wrapper.printBVH(tomatoIndex, 2);
 	//wrapper.validateBVH(tomatoIndex);
-	for (float i = 0; i < 360; i += 45)
+	wrapper.loadTransform(glm::vec3(0, 5, 0), glm::vec3(0, 0, 0), glm::vec3(1), PrimType::BVH_NODE, suzanneIndex);
+
+
+	// floor
+	wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0, 0, 0), glm::vec3(1), PrimType::BVH_NODE, wallIndex_white);
+	// ceiling
+	wrapper.loadTransform(glm::vec3(0, 25, 0), glm::vec3(0, 0, 0), glm::vec3(1), PrimType::BVH_NODE, wallIndex_white);
+	// walls
+	wrapper.loadTransform(glm::vec3(0, 0, 15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), PrimType::BVH_NODE, wallIndex_red);
+	wrapper.loadTransform(glm::vec3(0, 0, -15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), PrimType::BVH_NODE, wallIndex_green);
+	wrapper.loadTransform(glm::vec3(15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), PrimType::BVH_NODE, wallIndex_white);
+	wrapper.loadTransform(glm::vec3(-15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), PrimType::BVH_NODE, wallIndex_white);
+
+	for (float r = 0; r < PI * 2; r += PI / 6)
 	{
-		wrapper.loadTransform(glm::vec3(2 * (i / 45.f), 0, 0), glm::vec3(0, i, 0), glm::vec3(1), PrimType::BVH_NODE, suzanneIndex);
+		//wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * radius), 3, offset + (std::cos(r) * radius)), glm::vec3(0, 0, 0), glm::vec3(1), PrimType::BVH_NODE, suzanneIndex);
 	}
 
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, readingroomIndex);
@@ -88,7 +110,7 @@ int main()
 	int root = wrapper.loadBVH();
 	std::cout << "TLAS BVH (root node: " << root << ")\n";
 
-	wrapper.printBVH(root, 3);
+	//wrapper.printBVH(root, 3);
 
 	wrapper.init();
 

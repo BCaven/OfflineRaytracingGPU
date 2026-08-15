@@ -5,10 +5,11 @@ public static const float EPSILON = 1e-3;
 public static const float TWO_PI = 6.2831853;
 public static const float4 GLASS_F0 = float4(0.04);
 
-static const uint STACK_SIZE = 128;
+static const uint STACK_SIZE = 64;
 
 public static const float SPLAT_CUTOFF = 8.;
 public static const int SH_COUNT = 16;
+public static const uint MAX_TRAVERSALS = 10000;
 
 public static const float SH_C0 = 0.28209479177387814f;
 public static const float SH_C1 = 0.4886025119029199f;
@@ -44,7 +45,6 @@ public struct Ray
     public float3 direction;
     public float4 scatter;
     public float4 emission;
-    public float3 invDir;
 };
 
 struct Intersection
@@ -84,7 +84,6 @@ public struct Triangle
 public struct GaussianSplat
 {
     float3 center;
-    float3x3 invSigma;
     float3x3 rotation;
     float3 invScale2;
     float alpha;
@@ -131,11 +130,34 @@ public struct Transform
     int childIndex;
 }
 
+/*
+TODO: look at ways to reduce this memory footprint (especially frequent access items)
+
+Most of the time only index and t entry change
+
+Everything else could be stored in a different buffer that tracks transforms
+
+
+*/
+// NOTE: this should be as small as possible :)
+static const uint MAX_TRANSFORM_DEPTH = 4;
 struct TraversalNode
 {
     uint index;
-    Ray ray;
+    float3 rayOrigin;
+    float3 rayDirection;
     float tScale;
-    float3x3 normalMatrix = float3x3(1);
+    float tEntry;
+    uint transformDepth = 0;
+    uint transformChain[MAX_TRANSFORM_DEPTH];
+    // uint transformStackIndex;
+}
 
+struct TransformStackNdoe
+{
+    float tScale;
+    float3 rayOrigin;
+    float3 rayDirection;
+    uint transformDepth = 0;
+    uint transformChain[MAX_TRANSFORM_DEPTH];
 }

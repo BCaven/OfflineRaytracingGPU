@@ -227,11 +227,11 @@ public:
 			VkBufferCreateInfo uBufferCI{ 
 				.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 
 				.size = sizeof(ShaderData), 
-				.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT 
+				.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+				.sharingMode = VK_SHARING_MODE_EXCLUSIVE
 			};
 			VmaAllocationCreateInfo uBufferAllocCI{ 
-				.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-				VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+				.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |  // removed: VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT
 				VMA_ALLOCATION_CREATE_MAPPED_BIT, 
 				.usage = VMA_MEMORY_USAGE_AUTO 
 			};
@@ -518,8 +518,6 @@ public:
 	void initShaderData()
 	{
 		shaderData.windowMax = windowSize;
-		shaderData.numSpheres = spheres.size();
-		shaderData.numTris = triangles.size();
 		shaderData.frameCount = 0;
 		shaderData.resetRays = true;
 	}
@@ -856,11 +854,26 @@ public:
 				})
 		};
 		auto slangOptions{
-			std::to_array<slang::CompilerOptionEntry>({ 
-				{ 
-					slang::CompilerOptionName::EmitSpirvDirectly, 
-					{slang::CompilerOptionValueKind::Int, 1} } 
-				})
+			std::to_array<slang::CompilerOptionEntry>({
+				{
+					slang::CompilerOptionName::EmitSpirvDirectly,
+					{slang::CompilerOptionValueKind::Int, 1}
+				},
+				{
+					slang::CompilerOptionName::DebugInformation,
+					{
+						slang::CompilerOptionValueKind::Int,
+						SLANG_DEBUG_INFO_LEVEL_STANDARD
+					}
+				},
+				{
+					slang::CompilerOptionName::DebugInformationFormat,
+					{
+						slang::CompilerOptionValueKind::Int,
+						SLANG_DEBUG_INFO_FORMAT_DEFAULT
+					}
+				}
+			})
 		};
 		const char* searchPaths[] = {
 			"shaders"
@@ -954,6 +967,14 @@ public:
 		{
 			std::cerr << (const char*)diagnostics->getBufferPointer() << "\n";
 		}
+
+		std::ofstream f("triangle.spv", std::ios::binary);
+
+		f.write(
+			static_cast<const char*>(spirv->getBufferPointer()),
+			spirv->getBufferSize()
+		);
+
 		VkShaderModuleCreateInfo shaderModuleCI{
 			.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 			.codeSize = spirv->getBufferSize(),
@@ -968,7 +989,7 @@ public:
 	{
 		// Pipeline
 		VkPushConstantRange pushConstantRange{
-			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 			.size = sizeof(VkDeviceAddress)
 		};
 		VkPipelineLayoutCreateInfo pipelineLayoutCI{
@@ -1074,7 +1095,7 @@ public:
 		};
 		VmaAllocationCreateInfo allocCreateInfo{
 			.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
-			.usage = VMA_MEMORY_USAGE_AUTO,
+			.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
 		};
 		chk(vmaCreateBuffer(allocator, &binding.bufferInfo, &allocCreateInfo, &binding.buffer, &binding.bufferAllocation, nullptr));
 
@@ -1171,7 +1192,7 @@ public:
 		auto& binding = structuredBufferBindings[bindingName];
 
 		VkDescriptorBufferInfo descBufInfo{
-			.buffer = binding.buffer, //sphereBuffer,
+			.buffer = binding.buffer,
 			.range = VK_WHOLE_SIZE
 		};
 		for (auto i = 0; i < maxFramesInFlight; i++)
@@ -1256,35 +1277,8 @@ public:
 				min = make_aabb_min(min, c.right.min);
 				max = make_aabb_max(max, c.right.max);
 			}
-			
 		}
-		else if (prim == TRIANGLE)
-		{
-			const auto& t = triangles[transform.childIndex];
-			max = make_aabb_max(max, make_aabb_max(
-				make_aabb_max(t.v0, t.v1), t.v2));
-			min = make_aabb_min(min, make_aabb_min(
-				make_aabb_min(t.v0, t.v1), t.v2));
-			max += 0.001f;
-			min -= 0.001f;
-		}
-		else if (prim == GAUSSIAN_SPLAT)
-		{
-			const auto& splat = splats[transform.childIndex];
-			max = make_aabb_max(max, splat.center + splat.halfExtent);
-			min = make_aabb_min(min, splat.center - splat.halfExtent);
-		}
-		else if (prim == TRANSFORM)
-		{
-			getTransformMinMax(transforms[transform.childIndex], min, max);
-		}
-		else if (prim == SPHERE)
-		{
-			const auto& s = spheres[transform.childIndex];
-			max = make_aabb_max(max, s.center + s.radius);
-			min = make_aabb_min(min, s.center - s.radius);
-		}
-		else
+		else 
 		{
 			throw std::runtime_error("Not a supported type: " + transform.childPrim);
 		}
@@ -1299,148 +1293,48 @@ public:
 		transformAABB(transform.matrix, childMin, childMax, min, max);
 	}
 
+	void getSceneBounds(glm::vec3& sceneMin, glm::vec3& sceneMax)
+	{
+		for (const auto& s : spheres)
+		{
+			sceneMin = make_aabb_min(s.center - s.radius, sceneMin);
+			sceneMax = make_aabb_max(s.center + s.radius, sceneMax);
+		}
+		for (const auto& t : transforms)
+		{
+			glm::vec3 leftMin;
+			glm::vec3 leftMax;
+			getTransformMinMax(t, leftMin, leftMax);
+			sceneMin = make_aabb_min(leftMin, sceneMin);
+			sceneMax = make_aabb_max(leftMax, sceneMax);
+		}
+	}
+
 	int loadBVH()
 	{
 		// build TLAS bvh
-		/*
-		struct bvhNode
-		{
-			glm::vec3 min;
-			glm::vec3 max;
-			uint32_t mortonCode;
-			PrimType rightPrim;
-			PrimType leftPrim;
-			int leftIndex;
-			int rightIndex;
-		}
-		*/
+		
 		// get scene bounds
-		glm::vec3 sceneMin(FLT_MAX);
 		glm::vec3 sceneMax(-FLT_MAX);
-
-		// this is only spheres and transforms (i.e. things that are actually interacted with directly
-		std::vector<bvhNode> tmpNodes{};
-		for (size_t i = 0; i < spheres.size(); i += 2)
-		{
-			glm::vec3 min(FLT_MAX);
-			glm::vec3 max(-FLT_MAX);
-			if (i + 1 < spheres.size())
-			{
-				const auto& s0 = spheres[i];
-				const auto& s1 = spheres[i + 1];
-
-				min = make_aabb_min(s0.center - s0.radius, s1.center - s1.radius);
-				max = make_aabb_max(s0.center + s0.radius, s1.center + s1.radius);
-				
-				glm::vec3 center = (min + max) * 0.5f;
-
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0, //compute_morton_code(center, sceneMin, invSceneExtent),
-					.left = bvhChild{
-						.min = s0.center - s0.radius,
-						.max = s0.center + s0.radius,
-						.type = PrimType::SPHERE,
-						.index = (int)i,
-					},
-					.right = bvhChild{
-						.min = s1.center - s1.radius,
-						.max = s1.center + s1.radius,
-						.type = PrimType::SPHERE,
-						.index = (int)i + 1
-					}
-					});
-			}
-			else
-			{
-				const auto& s0 = spheres[i];
-
-				min = s0.center - s0.radius;
-				max = s0.center + s0.radius;
-				glm::vec3 center = (min + max) * 0.5f;
-
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0,
-					.left = bvhChild{
-						.min = min,
-						.max = max,
-						.type = PrimType::SPHERE,
-						.index = (int)i
-					},
-					.right = bvhChild{
-						.min = glm::vec3(FLT_MAX),
-						.max = glm::vec3(-FLT_MAX),
-						.type = PrimType::EMPTY,
-						.index = -1
-					}
-					});
-			}
-			sceneMin = make_aabb_min(min, sceneMin);
-			sceneMax = make_aabb_max(max, sceneMax);
-		}
-		for (size_t i = 0; i < transforms.size(); i += 2)
-		{
-			glm::vec3 min(FLT_MAX);
-			glm::vec3 max(-FLT_MAX);
-			if (i + 1 < transforms.size())
-			{
-				const auto& s0 = transforms[i];
-				const auto& s1 = transforms[i + 1];
-
-				glm::vec3 leftMin;
-				glm::vec3 leftMax;
-				glm::vec3 rightMin;
-				glm::vec3 rightMax;
-				getTransformMinMax(s0, leftMin, leftMax);
-				getTransformMinMax(s1, rightMin, rightMax);
-
-				min = make_aabb_min(min, make_aabb_min(leftMin, rightMin));
-				max = make_aabb_max(max, make_aabb_max(leftMax, rightMax));
-
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0, //compute_morton_code(center, sceneMin, invSceneExtent),
-					.left = bvhChild{
-						.min = leftMin,
-						.max = leftMax,
-						.type = PrimType::TRANSFORM,
-						.index = (int)i,
-					},
-					.right = bvhChild{
-						.min = rightMin,
-						.max = rightMax,
-						.type = PrimType::TRANSFORM,
-						.index = (int) i + 1
-					}		
-				});
-			}
-			else
-			{
-				const auto& s0 = transforms[i];
-
-				getTransformMinMax(s0, min, max);
-
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0,
-					.left = bvhChild{
-						.min = min,
-						.max = max,
-						.type = PrimType::TRANSFORM,
-						.index = (int)i
-					},
-					.right = bvhChild{
-						.min = glm::vec3(FLT_MAX),
-						.max = glm::vec3(-FLT_MAX),
-						.type = PrimType::EMPTY,
-						.index = -1
-					}					
-				});
-			}
-			sceneMin = make_aabb_min(min, sceneMin);
-			sceneMax = make_aabb_max(max, sceneMax);
-		}
+		glm::vec3 sceneMin(FLT_MAX);
 		
-		glm::vec3 invSceneExtent = 1.f / make_aabb_max(sceneMax - sceneMin, glm::vec3(1e-8));
-		
-		int root = buildChildBVH(tmpNodes, sceneMin, invSceneExtent);
+
+		std::vector<LeafItem> leaves;
+		for (size_t i = 0; i < spheres.size(); ++i)
+		{
+			const auto& s = spheres[i];
+			leaves.push_back({ s.center - s.radius, s.center + s.radius,
+								s.center, PrimType::SPHERE, (int)i });
+		}
+		for (size_t i = 0; i < transforms.size(); ++i)
+		{
+			glm::vec3 min, max;
+			getTransformMinMax(transforms[i], min, max);
+			leaves.push_back({ min, max, (min + max) * 0.5f, PrimType::TRANSFORM, (int)i });
+		}
+
+		glm::vec3 rootMin, rootMax;
+		int root = buildSAH(leaves, 0, (int)leaves.size(), rootMin, rootMax);
 
 		/*
 		for (const auto& node : bvhNodes)
@@ -1451,34 +1345,137 @@ public:
 		*/
 		return root;
 	}
-	
-	int buildChildBVH(std::vector<bvhNode>& tmpBVH, glm::vec3 sceneMin, glm::vec3 invSceneExtent)
+
+	int buildSAH(std::vector<LeafItem>& leaves, int start, int end, glm::vec3& outMin, glm::vec3& outMax)
 	{
-		if (tmpBVH.size() == 0)
+		int count = end - start;
+
+		if (count <= 2)
+		{
+			bvhChild left{ 
+				leaves[start].min, 
+				leaves[start].max, 
+				leaves[start].type, 
+				leaves[start].index };
+
+			bvhChild right = bvhChild{ glm::vec3(FLT_MAX), glm::vec3(-FLT_MAX), PrimType::EMPTY, -1 };
+			if (count == 2)
+			{
+				right = bvhChild{ 
+					leaves[start + 1].min, 
+					leaves[start + 1].max, 
+					leaves[start + 1].type, 
+					leaves[start + 1].index };
+			}
+
+			outMin = make_aabb_min(left.min, right.min);
+			outMax = make_aabb_max(left.max, right.max);
+			bvhNodes.push_back(bvhNode{ .mortonCode = 0, .left = left, .right = right });
+			return (int)bvhNodes.size() - 1;
+		}
+
+		// choose split axis by spread of centers
+		glm::vec3 cMin(FLT_MAX), cMax(-FLT_MAX);
+		for (int i = start; i < end; ++i)
+		{
+			cMin = make_aabb_min(leaves[i].center, cMin);
+			cMax = make_aabb_max(leaves[i].center, cMax);
+		}
+		glm::vec3 ext = cMax - cMin;
+		int axis = (ext.x > ext.y) ? (ext.x > ext.z ? 0 : 2) : (ext.y > ext.z ? 1 : 2);
+		
+		std::sort(leaves.begin() + start, leaves.begin() + end,
+			[axis](const LeafItem& a, const LeafItem& b) { return a.center[axis] < b.center[axis]; });
+
+		int bestSplit = start + count / 2;
+		float bestCost = FLT_MAX;
+		int buckets = std::min(count - 1, 16);
+
+		for (int b = 1; b <= buckets; ++b)
+		{
+			int split = start + (count * b) / (buckets + 1);
+			if (split <= start || split >= end) continue;
+
+			glm::vec3 lMin(FLT_MAX), lMax(-FLT_MAX), rMin(FLT_MAX), rMax(-FLT_MAX);
+			for (int i = start; i < split; ++i) 
+			{ 
+				lMin = make_aabb_min(leaves[i].min, lMin); 
+				lMax = make_aabb_max(leaves[i].max, lMax); 
+			}
+			for (int i = split; i < end; ++i) 
+			{ 
+				rMin = make_aabb_min(leaves[i].min, rMin); 
+				rMax = make_aabb_max(leaves[i].max, rMax); 
+			}
+
+			float cost = surfaceArea(lMax - lMin) * (split - start) + surfaceArea(rMax - rMin) * (end - split);
+			if (cost < bestCost) 
+			{ 
+				bestCost = cost; 
+				bestSplit = split; 
+			}
+		}
+
+		glm::vec3 lMin(FLT_MAX), lMax(-FLT_MAX), rMin(FLT_MAX), rMax(-FLT_MAX);
+		int leftIndex = buildSAH(leaves, start, bestSplit, lMin, lMax);
+		int rightIndex = buildSAH(leaves, bestSplit, end, rMin, rMax);
+
+		outMin = make_aabb_min(lMin, rMin);
+		outMax = make_aabb_max(lMax, rMax);
+
+		bvhNodes.push_back(bvhNode{
+			.mortonCode = 0,
+			.left = bvhChild{
+				lMin, lMax, PrimType::BVH_NODE, leftIndex
+			},
+			.right = bvhChild{
+				rMin, rMax, PrimType::BVH_NODE, rightIndex
+			}
+			});
+		return (int)bvhNodes.size() - 1;
+
+	}
+	
+	int buildChildBVH(std::vector<LeafItem>& leaves)
+	{
+		if (leaves.size() == 0)
 		{
 			// return the current root node
 			return bvhNodes.size() - 1;
 		}
+		glm::vec3 sceneMin(FLT_MAX);
+		glm::vec3 sceneMax(-FLT_MAX);
 
-		for (auto& node : tmpBVH)
+		for (auto& leaf : leaves)
 		{
-			glm::vec3 min = make_aabb_min(node.left.min, node.right.min);
-			glm::vec3 max = make_aabb_max(node.left.max, node.right.max);
-			glm::vec3 center = (min + max) * 0.5f;
-			node.mortonCode = compute_morton_code(center, sceneMin, invSceneExtent);
+			sceneMin = make_aabb_min(leaf.min, sceneMin);
+			sceneMax = make_aabb_max(leaf.max, sceneMax);
 		}
 
-		// sort by morton codes
-		std::sort(
-			tmpBVH.begin(),
-			tmpBVH.end(),
-			[](const bvhNode& a, const bvhNode& b)
+		glm::vec3 invSceneExtent = 1.f / make_aabb_max(sceneMax - sceneMin, glm::vec3(1e-8));
+
+		std::sort(leaves.begin(), leaves.end(), [&](const LeafItem& a, const LeafItem& b)
 			{
-				return a.mortonCode < b.mortonCode;
+				return compute_morton_code(a.center, sceneMin, invSceneExtent)
+					< compute_morton_code(b.center, sceneMin, invSceneExtent);
+			});
+		
+		std::vector<bvhNode> tmpBVH;
+		for (size_t i = 0; i < leaves.size(); i += 2)
+		{
+			bvhChild left{ leaves[i].min, leaves[i].max, leaves[i].type, leaves[i].index };
+
+			bvhChild right = bvhChild{ glm::vec3(FLT_MAX), glm::vec3(-FLT_MAX), PrimType::EMPTY, -1 };
+			if (i + 1 < leaves.size())
+			{
+				right = bvhChild{ leaves[i + 1].min, leaves[i + 1].max, leaves[i + 1].type, leaves[i + 1].index };
 			}
-		);
+
+			tmpBVH.push_back(bvhNode{ .mortonCode = 0, .left = left, .right = right });
+		}
+
 		// add to bvhNodes and build inner bvhNodes
-		bvhNodes.reserve(bvhNodes.size() + tmpBVH.size());
+		bvhNodes.reserve(bvhNodes.size() + leaves.size());
 		int startIndex = bvhNodes.size();
 		bvhNodes.insert(bvhNodes.end(), tmpBVH.begin(), tmpBVH.end());
 		int endIndex = startIndex + tmpBVH.size();
@@ -1543,9 +1540,8 @@ public:
 		{
 			throw std::runtime_error( "When loading " + filepath + " number of vertices was not a multiple of 3!");
 		}
-		std::cout << "Loading " << filepath << " with " << (int)vertices.size() / 3 << " vertices\n";
-		size_t offset = triangles.size();
-		
+		std::cout << "Loading " << filepath << " with " << (int)vertices.size() / 3 << " triangles\n";
+		std::vector<LeafItem> leaves;
 		for (size_t i = 0; i < vertices.size(); i += 3)
 		{
 			glm::vec3 v0 = vertices[i].pos;
@@ -1554,6 +1550,20 @@ public:
 
 			glm::vec3 normal = glm::normalize(glm::cross(v1 - v0, v2 - v0));
 
+			glm::vec3 min;
+			glm::vec3 max;
+			max = make_aabb_max(make_aabb_max(v0, v1), v2);
+			min = make_aabb_min(make_aabb_min(v0, v1), v2);
+
+			max += 0.001f;
+			min -= 0.001f;
+			leaves.push_back(LeafItem{
+				.min = min,
+				.max = max,
+				.center = (min + max) * 0.5f,
+				.type = PrimType::TRIANGLE,
+				.index = (int) triangles.size()
+				});
 			triangles.push_back(
 				Triangle{
 					.v0 = v0, .v1 = v1, .v2 = v2,
@@ -1563,76 +1573,8 @@ public:
 				}
 			);
 		}
-		std::vector<bvhNode> tmpNodes;
-		glm::vec3 sceneMin(FLT_MAX);
-		glm::vec3 sceneMax(-FLT_MAX);
-		for (int j = offset; j < triangles.size(); j+=2)
-		{
-			// push the bvh node:
-			glm::vec3 min;
-			glm::vec3 max;
-			if (j + 1 < triangles.size())
-			{
-				const auto& t0 = triangles[j];
-				const auto& t1 = triangles[j + 1];
 
-				glm::vec3 leftMax = make_aabb_max(make_aabb_max(t0.v0, t0.v1), t0.v2) + 0.001f;
-				glm::vec3 leftMin = make_aabb_min(make_aabb_min(t0.v0, t0.v1), t0.v2) - 0.001f;
-				glm::vec3 rightMax = make_aabb_max(make_aabb_max(t1.v0, t1.v1), t1.v2) + 0.001f;
-				glm::vec3 rightMin = make_aabb_min(make_aabb_min(t1.v0, t1.v1), t1.v2) - 0.001f;
-
-				min = make_aabb_min(leftMin, rightMin);
-				max = make_aabb_max(leftMax, rightMax);
-
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0, //compute_morton_code(center, sceneMin, invSceneExtent),
-					.left = bvhChild{
-						.min = leftMin,
-						.max = leftMax,
-						.type = PrimType::TRIANGLE,
-						.index = (int)j,
-					},
-					.right = bvhChild{
-						.min = rightMin,
-						.max = rightMax,
-						.type = PrimType::TRIANGLE,
-						.index = (int)j + 1
-					}
-					});
-			}
-			else
-			{
-				const auto& t0 = triangles[j];
-
-				max = make_aabb_max(make_aabb_max(t0.v0, t0.v1), t0.v2);
-				min = make_aabb_min(make_aabb_min(t0.v0, t0.v1), t0.v2);
-
-				max += 0.001f;
-				min -= 0.001f;
-
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0,
-					.left = bvhChild{
-						.min = min,
-						.max = max,
-						.type = PrimType::TRIANGLE,
-						.index = (int)j
-					},
-					.right = bvhChild{
-						.min = glm::vec3(FLT_MAX),
-						.max = glm::vec3(-FLT_MAX),
-						.type = PrimType::EMPTY,
-						.index = -1
-					}
-					});
-			}
-			sceneMin = make_aabb_min(sceneMin, min);
-			sceneMax = make_aabb_max(sceneMax, max);
-		}
-
-		// technically this is the scene extent that only includes the mesh
-		glm::vec3 invSceneExtent = 1.f / make_aabb_max(sceneMax - sceneMin, glm::vec3(1e-8));
-		return buildChildBVH(tmpNodes, sceneMin, invSceneExtent);
+		return buildChildBVH(leaves);
 	}
 
 	int loadSplat(std::string filepath)
@@ -1759,14 +1701,13 @@ public:
 		std::vector<unsigned char> row(rowStride);
 
 		
-		int offset = splats.size();
+		std::vector<LeafItem> leaves;
 		for (std::size_t i = 0; i < vertexCount; ++i) {
 			file.read(reinterpret_cast<char*>(row.data()), static_cast<std::streamsize>(row.size()));
 			if (!file) {
 				throw std::runtime_error("PLY ended before all vertex records were read");
 			}
 
-			// TODO: change this constructor to move the splat.update() function into the constructor
 			glm::vec3 center(
 				plyDetail::readAsFloat(row, x),
 				plyDetail::readAsFloat(row, y),
@@ -1824,9 +1765,6 @@ public:
 			S[1][1] = scale.y * scale_mod;
 			S[2][2] = scale.z * scale_mod;
 
-			glm::mat3 M = R * S; // S * R in cpu version
-			glm::mat3 sigma = M * glm::transpose(M);
-			glm::mat3 invSigma = glm::inverse(sigma);
 			float eps = 0.05;
 			float k = std::sqrt(-2.0 * std::log(eps)); // radius of ellipsoid in "S" units
 			//std::cout << "Alpha: " << alpha << "\n";
@@ -1835,6 +1773,7 @@ public:
 			glm::vec3 axis1 = k * scale.y * glm::vec3(R[1]);
 			glm::vec3 axis2 = k * scale.z * glm::vec3(R[2]);
 
+			// TODO: these AABBs are probably too big
 			// AABB half-extents = sum of |component| along each world axis
 			glm::vec3 halfExtent(
 				std::abs(axis0.x) + std::abs(axis1.x) + std::abs(axis2.x),
@@ -1868,7 +1807,6 @@ public:
 			materials.push_back(mat);
 			GaussianSplat gs{
 				.center = center,
-				.invSigma = invSigma,
 				.rotation = R,
 				.invScale2 = invScale2,
 				.alpha = alpha,
@@ -1876,72 +1814,18 @@ public:
 				.halfExtent = halfExtent
 			};
 
+			leaves.push_back(LeafItem{
+				.min = center - halfExtent,
+				.max = center + halfExtent,
+				.center = center,
+				.type = PrimType::GAUSSIAN_SPLAT,
+				.index = (int) splats.size()
+				});
+
 			splats.push_back(gs);
 		}
 
-		glm::vec3 sceneMin(FLT_MAX);
-		glm::vec3 sceneMax(-FLT_MAX);
-		for (int i = offset; i < splats.size(); i += 2)
-		{
-			// add bvh node
-			glm::vec3 min;
-			glm::vec3 max;
-			if (i + 1 < splats.size())
-			{
-				const auto& s0 = splats[i];
-				const auto& s1 = splats[i + 1];
-
-				glm::vec3 leftMin = s0.center - s0.halfExtent;
-				glm::vec3 leftMax = s0.center + s0.halfExtent;
-				glm::vec3 rightMin = s1.center - s1.halfExtent;
-				glm::vec3 rightMax = s1.center + s1.halfExtent;
-
-				min = make_aabb_min(leftMin, rightMin);
-				max = make_aabb_max(leftMax, rightMax);
-
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0, //compute_morton_code(center, sceneMin, invSceneExtent),
-					.left = bvhChild{
-						.min = leftMin,
-						.max = leftMax,
-						.type = PrimType::GAUSSIAN_SPLAT,
-						.index = (int)i,
-					},
-					.right = bvhChild{
-						.min = rightMin,
-						.max = rightMax,
-						.type = PrimType::GAUSSIAN_SPLAT,
-						.index = (int)i + 1
-					}
-					});
-			}
-			else
-			{
-				const auto& s0 = splats[i];
-				min = s0.center - s0.halfExtent;
-				max = s0.center + s0.halfExtent;
-				tmpNodes.push_back(bvhNode{
-					.mortonCode = 0,
-					.left = bvhChild{
-						.min = min,
-						.max = max,
-						.type = PrimType::GAUSSIAN_SPLAT,
-						.index = (int)i
-					},
-					.right = bvhChild{
-						.min = glm::vec3(FLT_MAX),
-						.max = glm::vec3(-FLT_MAX),
-						.type = PrimType::EMPTY,
-						.index = -1
-					}
-					});
-			}
-			sceneMin = make_aabb_min(sceneMin, min);
-			sceneMax = make_aabb_max(sceneMax, max);
-		}
-
-		glm::vec3 invSceneExtent = 1.f / make_aabb_max(sceneMax - sceneMin, glm::vec3(1e-8));
-		return buildChildBVH(tmpNodes, sceneMin, invSceneExtent);
+		return buildChildBVH(leaves);
 	}
 
 	void validateBVHNode(int index,	std::unordered_set<int>& visiting, std::unordered_set<int>& visited)
@@ -2114,6 +1998,31 @@ public:
 		};
 		chk(vkBeginCommandBuffer(cb, &cbBI));
 
+		// shader data
+		VkBufferMemoryBarrier2 shaderDataBarrier{
+			.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+			.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT,
+
+			.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+							VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+							VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+
+			.buffer = shaderDataBuffers[frameIndex].buffer,
+			.offset = 0,
+			.size = sizeof(ShaderData)
+		};
+
+		VkDependencyInfo shaderDataDependency{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.bufferMemoryBarrierCount = 1,
+			.pBufferMemoryBarriers = &shaderDataBarrier
+		};
+
+		vkCmdPipelineBarrier2(cb, &shaderDataDependency);
+
+
 		// swapchain image
 		VkImageMemoryBarrier2 frameImageToAttachment{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -2245,7 +2154,7 @@ public:
 		vkCmdPushConstants(
 			cb, 
 			pipelineLayout, 
-			VK_SHADER_STAGE_VERTEX_BIT, 
+			VK_SHADER_STAGE_FRAGMENT_BIT, 
 			0, 
 			sizeof(VkDeviceAddress), 
 			&shaderDataBuffers[frameIndex].deviceAddress

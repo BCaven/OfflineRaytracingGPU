@@ -13,7 +13,7 @@ public RWStructuredBuffer<Ray> rays;
 
 public void reset_ray(int rayIndex, float3 origin, float3 direction)
 {
-    rays[rayIndex] = Ray(origin, direction, float4(1), float4(0), 1.f / direction);
+    rays[rayIndex] = Ray(origin, direction, float4(1), float4(0));
 }
 
 public void init_rng(float2 pixel, int windowWidth, int frameCount)
@@ -69,6 +69,15 @@ float3 sample_sphere()
     float xz_r = sqrt(1 - y * y);
     float phi = TWO_PI * r1;
     return float3(xz_r * cos(phi), y, xz_r * sin(phi));
+}
+
+float3x3 identity3x3()
+{
+    return float3x3(
+        float3(1, 0, 0),
+        float3(0, 1, 0),
+        float3(0, 0, 1)
+    );
 }
 
 // Raytracing items
@@ -205,14 +214,23 @@ void scatter(int rayIndex, Intersection hit, Material material, float3 camDir)
     }
     else if (is_transmissive)
     {
-        scattered = refract(incident, N, ref_ratio);
+        // I dont think this check should be necessary
+        float3 refracted = refract(incident, N, ref_ratio);
+        if (length(refracted) < EPSILON)
+        {
+            scattered = reflect(incident, N);
+        }
+        else
+        {
+            scattered = refracted;
+        }
     }
     else
     {
         scattered = sample_lamberian(N);
     }
 
-    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered, input_ray.scatter * attenuation, input_ray.emission + material.emissiveColor, 1.f / scattered);
+    Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered, input_ray.scatter * attenuation, input_ray.emission + material.emissiveColor);
 
     rays[rayIndex] = outputRay;
 };
@@ -334,8 +352,9 @@ Intersection intersect_splat(const Ray ray, GaussianSplat gs, float closest_t)
 
 float2 aabb_bounds(Ray ray, float3 aabb_min, float3 aabb_max)
 {
-    float3 t0 = (aabb_min - ray.origin) * ray.invDir;
-    float3 t1 = (aabb_max - ray.origin) * ray.invDir;
+    float3 invDir = 1.f / ray.direction;
+    float3 t0 = (aabb_min - ray.origin) * invDir;
+    float3 t1 = (aabb_max - ray.origin) * invDir;
     float3 tMin = min(t0, t1);
     float3 tMax = max(t0, t1);
 
@@ -385,8 +404,17 @@ void ProcessPrimitive(
     }
     if (hit.t > 0 && hit.t * node.tScale < closest.t)
     {
-        // leaving this out for now
-        hit.normal = normalize(mul(node.normalMatrix, hit.normal));
+        // TODO: rebuild the normal transformation matrix
+        float3x3 normalMatrix = identity3x3();
+
+        for (uint i = 0; i < node.transformDepth; i++)
+        {
+            float3x3 transformNormal = transpose((float3x3)transforms[node.transformChain[i]].invMatrix);
+            normalMatrix = mul(normalMatrix, transformNormal);
+        }
+
+        float3 newNormal = normalize(mul(normalMatrix, hit.normal));
+        hit.normal = newNormal;
         hit.t *= node.tScale;
         closest = hit;
     }
@@ -402,10 +430,10 @@ void push_stack(inout TraversalNode stack[STACK_SIZE],
     }
 }
 
-bool transformRay(TraversalNode node, Transform t, out TraversalNode result)
+bool transformRay(TraversalNode node, uint transformIdx, Transform t, out TraversalNode result)
 {
-    float3 localOrigin = mul(t.invMatrix, float4(node.ray.origin, 1.f)).xyz;
-    float3 localDirection = mul((float3x3) t.invMatrix, node.ray.direction);
+    float3 localOrigin = mul(t.invMatrix, float4(node.rayOrigin, 1.f)).xyz;
+    float3 localDirection = mul((float3x3) t.invMatrix, node.rayDirection);
 
     float directionLength = length(localDirection);
     if (directionLength < EPSILON)
@@ -414,17 +442,30 @@ bool transformRay(TraversalNode node, Transform t, out TraversalNode result)
         result = TraversalNode();
         return false;
     }
-    Ray transformedRay = node.ray;
     float3 dir = localDirection / directionLength;
-    transformedRay.origin = localOrigin;
-    transformedRay.direction = dir;
-    transformedRay.invDir = 1. / dir;
-    float3x3 newNormalMatrix = mul(node.normalMatrix, transpose((float3x3)t.invMatrix));
-    result = TraversalNode(t.childIndex, transformedRay, node.tScale / directionLength, newNormalMatrix);
+    result.index = t.childIndex;
+    result.rayOrigin = localOrigin;
+    result.rayDirection = localDirection / directionLength;
+    result.tScale = node.tScale / directionLength;
+    result.tEntry = node.tEntry;
+
+    result.transformChain = node.transformChain;
+    if (node.transformDepth < MAX_TRANSFORM_DEPTH)
+    {
+        result.transformChain[node.transformDepth] = transformIdx; // since this is the traversal node pointing to a transform
+    }
+    result.transformDepth = min(node.transformDepth + 1, MAX_TRANSFORM_DEPTH);
     return true;
 }
 
-void processChild(inout TraversalNode stack[STACK_SIZE], inout uint stackPtr, TraversalNode node, inout Intersection closest, bvhChild child)
+void processChild(
+    inout TraversalNode stack[STACK_SIZE], 
+    inout uint stackPtr, 
+    TraversalNode node, 
+    inout Intersection closest, 
+    bvhChild child,
+    float childT
+)
 {
     if (child.index < 0) 
     {
@@ -433,7 +474,14 @@ void processChild(inout TraversalNode stack[STACK_SIZE], inout uint stackPtr, Tr
     }
     if (child.type == PrimType::BVH_NODE)
     {
-        TraversalNode childNode = TraversalNode(child.index, node.ray, node.tScale);
+        TraversalNode childNode;
+        childNode.index = child.index;
+        childNode.rayOrigin = node.rayOrigin;
+        childNode.rayDirection = node.rayDirection;
+        childNode.tScale = node.tScale;
+        childNode.tEntry = childT;
+        childNode.transformChain = node.transformChain;
+        childNode.transformDepth = node.transformDepth;
         push_stack(stack, stackPtr, childNode);
     }
     else if (child.type == PrimType::TRANSFORM)
@@ -441,16 +489,19 @@ void processChild(inout TraversalNode stack[STACK_SIZE], inout uint stackPtr, Tr
         // Assume TRANSFORMs can *only* hold BVH_NODE
         Transform t = transforms[child.index];
         TraversalNode resolved;
-        
+        node.tEntry = childT;
         // the transformed BVH node
-        if (transformRay(node, t, resolved))
+        if (transformRay(node, child.index, t, resolved))
         {
             push_stack(stack, stackPtr, resolved);
         }        
     }
     else
     {
-        ProcessPrimitive(child.type, child.index, node.ray, closest, node);
+        Ray intersectionRay;
+        intersectionRay.direction = node.rayDirection;
+        intersectionRay.origin = node.rayOrigin;
+        ProcessPrimitive(child.type, child.index, intersectionRay, closest, node);
     }
 
 }
@@ -469,10 +520,15 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
             potentially push children
     return closest
     */
-    const uint MAX_TRAVERSALS = 20000;
-    uint iterations = 0;
-    TraversalNode root = TraversalNode(rootIndex, rays[rayIndex], 1.f);
-
+    int iterations = 0;
+    Ray startRay = rays[rayIndex];
+    TraversalNode root; // = TraversalNode(rootIndex, startRay.origin, startRay.direction, 1.f, 0.f);
+    root.index = rootIndex;
+    root.rayOrigin = startRay.origin;
+    root.rayDirection = startRay.direction;
+    root.tScale = 1.f;
+    root.tEntry = 0.f;
+    root.transformDepth = 0;
     TraversalNode stack[STACK_SIZE];
     uint stackPtr = 0;
 
@@ -485,42 +541,51 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
     {
         iterations++;
         TraversalNode node = stack[--stackPtr];
-        
-        Ray ray = node.ray;
+        float tEntry = node.tEntry;
+
+        if (tEntry >= closest.t)
+        {
+            continue;
+        }
+
+        Ray intersectionRay;
+        intersectionRay.direction = node.rayDirection;
+        intersectionRay.origin = node.rayOrigin;
 
         const bvhNode current = bvhNodes[node.index];
-
+        bvhChild left = current.left;
+        bvhChild right = current.right;
         float leftT = FLT_MAX;
-        if (current.left.type != PrimType::EMPTY)
+        if (left.type != PrimType::EMPTY)
         {
-            leftT = node.tScale * intersect_aabb(ray, current.left);
+            leftT = node.tScale * intersect_aabb(intersectionRay, left);
         }
         float rightT = FLT_MAX;
-        if (current.right.type != PrimType::EMPTY)
+        if (right.type != PrimType::EMPTY)
         {
-            rightT = node.tScale * intersect_aabb(ray, current.right);
+            rightT = node.tScale * intersect_aabb(intersectionRay, right);
         }
         if (leftT < rightT)
         {
             // push far child first
             if (rightT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, current.right);
+                processChild(stack, stackPtr, node, closest, right, rightT);
             }
             if (leftT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, current.left);
+                processChild(stack, stackPtr, node, closest, left, leftT);
             }
         }
         else
         {
             if (leftT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, current.left);
+                processChild(stack, stackPtr, node, closest, left, leftT);
             }
             if (rightT < closest.t)
             {
-                processChild(stack, stackPtr, node, closest, current.right);
+                processChild(stack, stackPtr, node, closest, right, rightT);
             }
         }
     }
@@ -533,7 +598,7 @@ public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBou
     float4 throughputScatter = ray.scatter;
     float4 throughputEmission = ray.emission;
     float4 radianceSample = throughputScatter * throughputEmission;
-    
+
     // TODO: obv this fails if there is no BVH
     Intersection intersection = intersect_scene_bvh(rayIndex, bvhRoot);
     if (!valid_intersection(intersection))
@@ -549,9 +614,11 @@ public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBou
     {
         // maybe do lambertian shading?
         // or depth? XD
-        //float light = dot(intersection.normal, float3(0, 1, 0));
+        // float light = dot(intersection.normal, float3(0, 1, 0));
         return ray.scatter;
     }
 
+
+    // TODO later: deal with emission > 1 that blow out the pixels
     return ray.emission * ray.scatter; 
 }

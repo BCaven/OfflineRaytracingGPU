@@ -17,8 +17,6 @@ struct Camera
 struct ShaderData
 {
     uint2 windowMax;
-    uint numSpheres;
-    uint numTris;
     int frameCount;
     float4 backgroundColor;
     Camera camera;
@@ -36,14 +34,4 @@ Sampler2D previousFrame;
 struct VSOutput
 {
     float4 Pos : SV_POSITION;
-    uint2 windowMax;
-    uint numSpheres;
-    uint numTris;
-    int frameCount;
-    float4 backgroundColor;
-    Camera camera;
-    uint bvhRoot;
-    bool resetRays;
-    float3 camDir;
-    int bounceCount;
 };

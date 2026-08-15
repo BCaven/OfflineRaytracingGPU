@@ -40,7 +40,6 @@ struct Ray
 	glm::vec3 direction;
 	glm::vec4 scatter;
 	glm::vec4 emission;
-	glm::vec3 invDir;
 };
 
 // TODO: later this will be removed since the BVH will exclusively be on the GPU
@@ -69,7 +68,12 @@ struct bvhNode
 	bvhChild right;
 };
 
-
+struct LeafItem
+{
+	glm::vec3 min, max, center;
+	PrimType type;
+	int index;
+};
 
 struct Material
 {
@@ -82,7 +86,6 @@ struct Material
 struct GaussianSplat
 {
 	glm::vec3 center;
-	glm::mat3x3 invSigma;
 	glm::mat3x3 rotation;
 	glm::vec3 invScale2;
 	float alpha;
@@ -124,8 +127,6 @@ struct Triangle
 struct ShaderData 
 {
 	glm::uvec2 windowMax;
-	unsigned int numSpheres;
-	unsigned int numTris;
 	int frameCount = 0;
 	glm::vec4 backgroundColor = glm::vec4(0.3, 0.5, 1.0, 1.0);
 	Camera camera;
@@ -236,6 +237,12 @@ static inline glm::vec3 make_aabb_min(glm::vec3 p1, glm::vec3 p2)
 		p1.y < p2.y ? p1.y : p2.y,
 		p1.z < p2.z ? p1.z : p2.z
 	);
+}
+
+static inline float surfaceArea(const glm::vec3& extent)
+{
+	glm::vec3 e = make_aabb_max(extent, glm::vec3(0.f));
+	return 2.f * (e.x * e.y + e.y * e.z + e.z * e.x);
 }
 
 static inline int BuildBVHRecursive(std::vector<bvhNode>& nodes, int begin, int end)

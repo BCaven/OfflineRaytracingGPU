@@ -370,3 +370,6 @@ assets/
 *.ply
 *.obj
 *.mtl
+/OfflineRaytracingGPU/imgui.ini
+*.spv
+/OfflineRaytracingGPU/imgui.ini
