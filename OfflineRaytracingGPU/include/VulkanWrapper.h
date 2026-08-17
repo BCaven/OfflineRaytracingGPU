@@ -1380,6 +1380,7 @@ public:
 
 	int buildSAH(std::vector<LeafItem>& leaves, int start, int end, glm::vec3& outMin, glm::vec3& outMax)
 	{
+		float emptyBonusFactor = 0.5;
 		int count = end - start;
 
 		if (count <= 2)
@@ -1439,8 +1440,14 @@ public:
 				rMin = make_aabb_min(leaves[i].min, rMin); 
 				rMax = make_aabb_max(leaves[i].max, rMax); 
 			}
-
-			float cost = surfaceArea(lMax - lMin) * (split - start) + surfaceArea(rMax - rMin) * (end - split);
+			float leftCount = split - start;
+			float rightCount = end - split;
+			float cost = surfaceArea(lMax - lMin) * (leftCount) + surfaceArea(rMax - rMin) * (rightCount);
+			if (leftCount == 0 || rightCount == 0)
+			{
+				// reward empty space - noticably improved number of nodes hit :)
+				cost *= emptyBonusFactor;
+			}
 			if (cost < bestCost) 
 			{ 
 				bestCost = cost; 
@@ -1492,28 +1499,14 @@ public:
 					< compute_morton_code(b.center, sceneMin, invSceneExtent);
 			});
 		
-		std::vector<bvhNode> tmpBVH;
-		for (size_t i = 0; i < leaves.size(); i += 2)
-		{
-			bvhChild left{ leaves[i].min, leaves[i].max, leaves[i].type, leaves[i].index };
-
-			bvhChild right = bvhChild{ glm::vec3(FLT_MAX), glm::vec3(-FLT_MAX), PrimType::EMPTY, -1 };
-			if (i + 1 < leaves.size())
-			{
-				right = bvhChild{ leaves[i + 1].min, leaves[i + 1].max, leaves[i + 1].type, leaves[i + 1].index };
-			}
-
-			tmpBVH.push_back(bvhNode{ .mortonCode = 0, .left = left, .right = right });
-		}
-
 		// add to bvhNodes and build inner bvhNodes
-		bvhNodes.reserve(bvhNodes.size() + leaves.size());
 		int startIndex = bvhNodes.size();
-		bvhNodes.insert(bvhNodes.end(), tmpBVH.begin(), tmpBVH.end());
-		int endIndex = startIndex + tmpBVH.size();
+		int endIndex = startIndex + (leaves.size() / 2);
 
 		// return root node index
-		return BuildBVHRecursive(bvhNodes, startIndex, endIndex);
+		glm::vec3 childMin;
+		glm::vec3 childMax;
+		return buildSAH(leaves, 0, leaves.size(), childMin, childMax);
 	}
 	
 	int loadTransform(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale, PrimType childPrim, int childIndex)

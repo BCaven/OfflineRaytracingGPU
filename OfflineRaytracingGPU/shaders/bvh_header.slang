@@ -82,7 +82,7 @@ public struct Triangle
     uint materialIndex;
 };
 
-public struct GaussianSplat
+public struct GaussianSplat // packing shenanigans available here. Probably more important to hit fewer of these
 {
     float3 center;
     float3x3 rotation; // 
