@@ -1,19 +1,26 @@
 #include "bvh_header.slang"
 
-public static float4 backgroundColor = float4(0);
-
 public StructuredBuffer<Sphere> spheres;
 public StructuredBuffer<Triangle> triangles;
 public StructuredBuffer<GaussianSplat> splats;
 public StructuredBuffer<SphericalHarmonic> shMats;
 public StructuredBuffer<Material> materials;
-public StructuredBuffer<bvhNode> bvhNodes;
+public StructuredBuffer<bvhPacked> bvhNodes;
 public StructuredBuffer<Transform> transforms;
 public RWStructuredBuffer<Ray> rays;
 
 public void reset_ray(int rayIndex, float3 origin, float3 direction)
 {
     rays[rayIndex] = Ray(origin, direction, float4(1), float4(0));
+}
+
+PrimType unpackType(uint packed)
+{
+    return PrimType(packed >> 28);
+}
+int unpackIndex(uint packed)
+{
+    return int(packed & 0x0FFFFFFFu);
 }
 
 public void init_rng(float2 pixel, int windowWidth, int frameCount)
@@ -249,7 +256,7 @@ bool valid_intersection(Intersection hit)
     return hit.t > 0 && hit.t != FLT_MAX;
 }
 
-float4 sky_color(Ray ray)
+float4 sky_color(Ray ray, float4 backgroundColor)
 {
     float t = 0.5 * (normalize(ray.direction).y + 1.0);
     return backgroundColor; //(1 - t) * float4(1) + t * backgroundColor;
@@ -368,9 +375,9 @@ float2 aabb_bounds(Ray ray, float3 aabb_min, float3 aabb_max)
     return valid ? float2(tHit, tFar) : float2(FLT_MAX);
 }
 
-float intersect_aabb(Ray ray, bvhChild bvh)
+float intersect_aabb(Ray ray, float3 min, float3 max)
 {
-    float2 bounds = aabb_bounds(ray, bvh.min, bvh.max);
+    float2 bounds = aabb_bounds(ray, min, max);
     return bounds.x;
 }
 
@@ -484,20 +491,21 @@ void processChild(
     inout uint transformStackPtr,
     TraversalNode node, 
     inout Intersection closest, 
-    bvhChild child,
+    uint childIndex,
+    PrimType childType,
     float childT
 )
 {
-    if (child.index < 0) 
+    if (childIndex < 0) 
     {
         // oops!
         return;
     }
-    if (child.type == PrimType::BVH_NODE)
+    if (childType == PrimType::BVH_NODE)
     {
         // Dont push a new transform chain to the transform stack since we are just using the same one from before
         TraversalNode childNode;
-        childNode.index = child.index;
+        childNode.index = childIndex;
         childNode.tEntry = childT;
         childNode.transformStackIndex = node.transformStackIndex;
         transformStack[node.transformStackIndex].nodesUsingThis += 1;
@@ -510,16 +518,16 @@ void processChild(
         //childNode.transformDepth = node.transformDepth;
         push_stack(stack, stackPtr, childNode);
     }
-    else if (child.type == PrimType::TRANSFORM)
+    else if (childType == PrimType::TRANSFORM)
     {
         // Assume TRANSFORMs can *only* hold BVH_NODE
-        Transform t = transforms[child.index];
+        Transform t = transforms[childIndex];
         TransformStackNode transformStackNode = transformStack[node.transformStackIndex];
         TraversalNode resolved;
         TransformStackNode resolvedStackNode;
         node.tEntry = childT;
         // the transformed BVH node
-        if (transformRay(node, transformStackNode, child.index, t, resolved, resolvedStackNode))
+        if (transformRay(node, transformStackNode, childIndex, t, resolved, resolvedStackNode))
         {
             resolvedStackNode.nodesUsingThis = 1;
             uint newTransformIndex = transformStackPtr;
@@ -536,7 +544,7 @@ void processChild(
         TransformStackNode currentTransform = transformStack[node.transformStackIndex];
         intersectionRay.direction = currentTransform.rayDirection;
         intersectionRay.origin = currentTransform.rayOrigin;
-        ProcessPrimitive(child.type, child.index, intersectionRay, closest, node, currentTransform);
+        ProcessPrimitive(childType, childIndex, intersectionRay, closest, node, currentTransform);
     }
 }
 
@@ -597,40 +605,46 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
         intersectionRay.direction = transformNode.rayDirection;
         intersectionRay.origin = transformNode.rayOrigin;
 
-        const bvhNode current = bvhNodes[node.index];
-        bvhChild left = current.left;
-        bvhChild right = current.right;
+        const bvhPacked current = bvhNodes[node.index];
+        float3 leftMin = current.leftMin_leftPacked.xyz;
+        float3 leftMax = current.leftMax_rightPacked.xyz;
+        float3 rightMin = current.rightMin_reserved0.xyz;
+        float3 rightMax = current.rightMax_reserved1.xyz;
+        uint leftIndex = unpackIndex(bit_cast<uint>(current.leftMin_leftPacked.w));
+        PrimType leftType = unpackType(bit_cast<uint>(current.leftMin_leftPacked.w));
+        uint rightIndex = unpackIndex(bit_cast<uint>(current.leftMax_rightPacked.w));
+        PrimType rightType = unpackType(bit_cast<uint>(current.leftMax_rightPacked.w));
         float leftT = FLT_MAX;
-        if (left.type != PrimType::EMPTY)
+        if (leftType != PrimType::EMPTY)
         {
-            leftT = transformNode.tScale * intersect_aabb(intersectionRay, left);
+            leftT = transformNode.tScale * intersect_aabb(intersectionRay, leftMin, leftMax);
         }
         float rightT = FLT_MAX;
-        if (right.type != PrimType::EMPTY)
+        if (rightType != PrimType::EMPTY)
         {
-            rightT = transformNode.tScale * intersect_aabb(intersectionRay, right);
+            rightT = transformNode.tScale * intersect_aabb(intersectionRay, rightMin, rightMax);
         }
         if (leftT < rightT)
         {
             // push far child first
             if (rightT < closest.t)
             {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, right, rightT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
             }
             if (leftT < closest.t)
             {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, left, leftT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
             }
         }
         else
         {
             if (leftT < closest.t)
             {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, left, leftT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
             }
             if (rightT < closest.t)
             {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, right, rightT);
+                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
             }
         }
         releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
@@ -638,7 +652,7 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
     return closest;
 }
 
-public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBounceDebug)
+public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor)
 {
     Ray ray = rays[rayIndex];
     float4 throughputScatter = ray.scatter;
@@ -649,7 +663,7 @@ public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBou
     Intersection intersection = intersect_scene_bvh(rayIndex, bvhRoot);
     if (!valid_intersection(intersection))
     {
-        return throughputScatter * (throughputEmission + sky_color(ray));
+        return throughputScatter * (throughputEmission + sky_color(ray, backgroundColor));
     }
     Material material = materials[intersection.materialIndex];
 

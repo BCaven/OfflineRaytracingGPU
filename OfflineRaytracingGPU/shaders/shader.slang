@@ -37,7 +37,6 @@ float4 main(VSOutput input)
 {
     // TODO: the shader actually has no idea what the max bounce count is :)
     init_rng(input.Pos.xy, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount);
-    backgroundColor = shaderData.backgroundColor;
     int rayIndex = (int)(input.Pos.x + (input.Pos.y * shaderData.windowMax.x));
 
     if (shaderData.resetRays)
@@ -62,7 +61,7 @@ float4 main(VSOutput input)
     float2 uv = input.Pos.xy / shaderData.windowMax;
     float4 historyColor = previousFrame.Sample(uv);
     float weight = 1.0 / (shaderData.frameCount + 1.0);
-    float4 radianceSample = ray_color(rayIndex, shaderData.bvhRoot, shaderData.camDir, lambertianLighting);
+    float4 radianceSample = ray_color(rayIndex, shaderData.bvhRoot, shaderData.camDir, lambertianLighting, shaderData.backgroundColor);
     
     float4 outColor = lerp(historyColor, radianceSample, weight);
 

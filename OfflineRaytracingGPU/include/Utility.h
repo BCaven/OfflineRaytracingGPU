@@ -43,7 +43,7 @@ struct Ray
 };
 
 // TODO: later this will be removed since the BVH will exclusively be on the GPU
-enum PrimType
+enum PrimType : unsigned int
 {
 	SPHERE,
 	TRIANGLE,
@@ -66,6 +66,14 @@ struct bvhNode
 	uint64_t mortonCode;
 	bvhChild left;
 	bvhChild right;
+};
+
+struct bvhPacked
+{
+	glm::vec4 leftMin_leftPacked; // xyz left.min, w = packed left.type / left.index
+	glm::vec4 leftMax_rightPacked; // xyz left.max, w = packed right.type / right.index
+	glm::vec4 rightMin_reserved0; // xyz right.min, w unused
+	glm::vec4 rightMax_reserved1; // same
 };
 
 struct LeafItem
@@ -243,6 +251,11 @@ static inline float surfaceArea(const glm::vec3& extent)
 {
 	glm::vec3 e = make_aabb_max(extent, glm::vec3(0.f));
 	return 2.f * (e.x * e.y + e.y * e.z + e.z * e.x);
+}
+
+static inline unsigned int packChild(PrimType type, int index)
+{
+	return (unsigned int(type) << 28) | (unsigned int(index) & 0x0FFFFFFFu);
 }
 
 static inline int BuildBVHRecursive(std::vector<bvhNode>& nodes, int begin, int end)

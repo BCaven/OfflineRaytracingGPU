@@ -98,7 +98,7 @@ public struct SphericalHarmonic
     int degree = 0;
 };
 
-public enum PrimType
+public enum PrimType : uint
 {
     SPHERE,
     TRIANGLE,
@@ -108,19 +108,12 @@ public enum PrimType
     EMPTY
 };
 
-public struct bvhNode
+public struct bvhPacked
 {
-    uint64_t mortonCode;
-    bvhChild left;
-    bvhChild right;
-};
-
-struct bvhChild
-{
-    float3 min;
-    float3 max;
-    PrimType type;
-    int index;
+    float4 leftMin_leftPacked; // xyz left.min, w = packed left.type / left.index
+    float4 leftMax_rightPacked; // xyz left.max, w = packed right.type / right.index
+    float4 rightMin_reserved0; // xyz right.min, w unused
+    float4 rightMax_reserved1; // same
 };
 
 public struct Transform

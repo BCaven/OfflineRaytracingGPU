@@ -4,6 +4,7 @@
 #include "Utility.h"
 #include "KeyInputs.h"
 #include <unordered_set>
+#include <bit>
 
 constexpr uint32_t maxBounces{ 10 };
 constexpr uint32_t maxFramesInFlight{ 2 };
@@ -150,6 +151,7 @@ public:
 	std::vector<Sphere> spheres;
 	std::vector<Triangle> triangles;
 	std::vector<bvhNode> bvhNodes;
+	std::vector<bvhPacked> bvhNodesPacked;
 	std::vector<Material> materials;
 	std::vector<GaussianSplat> splats;
 	std::vector<Transform> transforms;
@@ -290,7 +292,9 @@ public:
 
 		loadStructuredBuffer("materials", materials);
 
-		loadStructuredBuffer("bvhNodes", bvhNodes);
+		packBvhNodes();
+
+		loadStructuredBuffer("bvhNodes", bvhNodesPacked);
 
 		loadStructuredBuffer("transforms", transforms);
 
@@ -1307,6 +1311,34 @@ public:
 			getTransformMinMax(t, leftMin, leftMax);
 			sceneMin = make_aabb_min(leftMin, sceneMin);
 			sceneMax = make_aabb_max(leftMax, sceneMax);
+		}
+	}
+
+	void packBvhNodes()
+	{
+		// convert old bvh nodes to the packed version (aka the gpu version)
+		// TODO later: just make everything the packed version
+		bvhNodesPacked.reserve(bvhNodes.size());
+		for (const auto& node : bvhNodes)
+		{
+			/*
+			struct bvhPacked
+			{
+				glm::vec4 leftMin_leftPacked; // xyz left.min, w = packed left.type / left.index
+				glm::vec4 leftMax_rightPacked; // xyz left.max, w = packed right.type / right.index
+				glm::vec4 rightMin_reserved0; // xyz right.min, w unused
+				glm::vec4 rightMax_reserved1; // same
+			};
+			*/
+			// pack
+			unsigned int packedLeft = packChild(node.left.type, node.left.index);
+			unsigned int packedRight = packChild(node.right.type, node.right.index);
+			bvhNodesPacked.push_back(bvhPacked{
+				.leftMin_leftPacked = glm::vec4(node.left.min, std::bit_cast<float>(packedLeft)),
+				.leftMax_rightPacked = glm::vec4(node.left.max, std::bit_cast<float>(packedRight)),
+				.rightMin_reserved0 = glm::vec4(node.right.min, 0),
+				.rightMax_reserved1 = glm::vec4(node.right.max, 0)
+				});
 		}
 	}
 
