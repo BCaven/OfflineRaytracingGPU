@@ -542,3 +542,127 @@ namespace plyDetail {
 	}
 
 } // namespace plyDetail
+
+
+// reflection api validation:
+static inline void checkField(
+	slang::VariableLayoutReflection* field,
+	size_t expectedOffset,
+	size_t expectedCount,
+	size_t expectedElementSize)
+{
+	using namespace slang;
+
+	const size_t offset =
+		field->getOffset(ParameterCategory::Uniform);
+
+	if (offset != expectedOffset)
+	{
+		throw std::runtime_error(
+			std::string("field offset mismatch: ") + field->getName());
+	}
+
+	auto* typeLayout = field->getTypeLayout();
+	auto* type = typeLayout->getType();
+
+	if (type->getKind() != TypeReflection::Kind::Array)
+		throw std::runtime_error(
+			std::string("expected array field: ") + field->getName());
+
+	if (type->getElementCount() != expectedCount)
+		throw std::runtime_error(
+			std::string("array count mismatch: ") + field->getName());
+
+	auto* elementLayout = typeLayout->getElementTypeLayout();
+
+	if (elementLayout->getSize(ParameterCategory::Uniform) != expectedElementSize)
+		throw std::runtime_error(
+			std::string("array element size mismatch: ") + field->getName());
+
+	if (typeLayout->getStride(ParameterCategory::Uniform) != expectedElementSize)
+		throw std::runtime_error(
+			std::string("array stride mismatch: ") + field->getName());
+}
+
+static inline void printField(
+	slang::VariableLayoutReflection* field,
+	size_t expectedOffset,
+	size_t expectedCount,
+	size_t expectedElementSize)
+{
+	using namespace slang;
+
+	auto* typeLayout = field->getTypeLayout();
+	auto* type = typeLayout->getType();
+
+	std::cout << "\nFIELD: " << field->getName() << "\n";
+	std::cout << "  offset: "
+		<< field->getOffset(ParameterCategory::Uniform) << "\n";
+
+	std::cout << "  kind: "
+		<< int(type->getKind()) << "\n";
+
+	std::cout << "  size: "
+		<< typeLayout->getSize(ParameterCategory::Uniform) << "\n";
+
+	std::cout << "  stride: "
+		<< typeLayout->getStride(ParameterCategory::Uniform) << "\n";
+
+	std::cout << "  element size: "
+		<< typeLayout->getElementTypeLayout()->getSize(
+			ParameterCategory::Uniform)
+		<< "\n";
+
+	std::cout << "  element stride: "
+		<< typeLayout->getElementTypeLayout()->getStride(
+			ParameterCategory::Uniform)
+		<< "\n";
+
+	std::cout << "  element count: "
+		<< type->getElementCount()
+		<< "\n";
+}
+
+static inline void validateKDopNodeHotLayout(slang::TypeLayoutReflection* layout)
+{
+	using namespace slang;
+
+	auto uniform = ParameterCategory::Uniform;
+
+	assert(std::strcmp(layout->getName(), "KDopNodeHot") == 0);
+
+	const size_t expectedSize = sizeof(KDopNodeHot);
+
+	if (layout->getSize(uniform) != expectedSize)
+		throw std::runtime_error("KDopNodeHot size mismatch");
+
+	if (layout->getAlignment(uniform) != alignof(KDopNodeHot))
+		throw std::runtime_error("KDopNodeHot alignment mismatch");
+
+	if (layout->getFieldCount() != 2)
+		throw std::runtime_error("KDopNodeHot field count mismatch");
+
+	auto* minField = layout->getFieldByIndex(0);
+	auto* maxField = layout->getFieldByIndex(1);
+
+	if (std::strcmp(minField->getName(), "min_packed") != 0)
+		throw std::runtime_error("KDopNodeHot field 0 mismatch");
+
+	if (std::strcmp(maxField->getName(), "max") != 0)
+		throw std::runtime_error("KDopNodeHot field 1 mismatch");
+
+	printField(
+		minField,
+		offsetof(KDopNodeHot, min_packed),
+		KDOP_WIDTH,
+		sizeof(glm::vec4));
+
+	printField(
+		maxField,
+		offsetof(KDopNodeHot, max),
+		KDOP_WIDTH,
+		sizeof(glm::vec4));
+
+	if (layout->getSize(uniform) != sizeof(KDopNodeHot))
+		throw std::runtime_error("KDopNodeHot final size mismatch");
+}

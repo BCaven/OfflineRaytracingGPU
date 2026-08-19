@@ -304,6 +304,7 @@ public:
 		loadStructuredBuffer("kdopHotNodes", kdopHotNodes);
 		loadStructuredBuffer("kdopColdNodes", kdopColdNodes);
 
+
 		loadStructuredBuffer("transforms", transforms);
 
 		loadStructuredBuffer("rays", rayOrigins, windowSize.x * windowSize.y);
@@ -967,6 +968,13 @@ public:
 		{
 			slang::VariableLayoutReflection* param = programLayout->getParameterByIndex(i);
 			std::string name = param->getName();
+
+			auto* bufferLayout = param->getTypeLayout();
+			std::cout << "parameter: " << param->getName() << "\n";
+			std::cout << "type:      " << bufferLayout->getName() << "\n";
+			std::cout << "kind:      " << int(bufferLayout->getKind()) << "\n";
+
+
 			bindings[name] = {
 				.binding = param->getBindingIndex(),
 				.set = param->getBindingSpace()

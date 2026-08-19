@@ -8,7 +8,7 @@ TODO:
 
 #include "shader_header.slang"
 
-import bvh;
+import scene;
 
 
 [shader("vertex")]

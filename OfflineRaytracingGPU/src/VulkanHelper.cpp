@@ -36,7 +36,7 @@ int main()
 
 	glm::vec4 light_white = glm::vec4(10);
 	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
-	glm::vec4 sky = 10.f * (glm::vec4(4, 4, 4, 255) / 255.f);
+	glm::vec4 sky = 20.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 1},				// 0
@@ -104,8 +104,10 @@ int main()
 	}
 
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, readingroomIndex);	
-	wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::KDOP_NODE, tomatoIndex);
+	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::KDOP_NODE, tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
+
+	int wideTomatoIndex = wrapper.flattenKDop(tomatoIndex);
 
 	for (int i = (int)wrapper.kdopHotNodes.size() - 1; i > (int)wrapper.kdopHotNodes.size() - 8; i--)
 	{
