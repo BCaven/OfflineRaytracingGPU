@@ -12,6 +12,20 @@ constexpr int SH_PACKED_VEC4_COUNT = SH_FLOAT_COUNT / 4;
 static_assert(SH_FLOAT_COUNT % 4 == 0,
 	"Spherical harmonic coefficients must pack into vec4 attributes");
 
+constexpr int KDOP_AXIS_COUNT = 7;
+constexpr int KDOP_WIDTH = 8;
+constexpr float invSqrt2 = 0.707106781187;
+constexpr float invSqrt3 = 0.57735026919;
+static constexpr glm::vec3 KDOP_DIRECTIONS[7] =
+{
+	{ 1, 0, 0 },
+	{ 0, 1, 0 },
+	{ 0, 0, 1 },
+	{invSqrt3, invSqrt3, invSqrt3},
+	{invSqrt3, invSqrt3,-invSqrt3 },
+	{invSqrt3,-invSqrt3, invSqrt3 },
+	{ invSqrt3,-invSqrt3,-invSqrt3 }
+};
 
 struct CameraWrapper
 {
@@ -50,6 +64,7 @@ enum PrimType : unsigned int
 	GAUSSIAN_SPLAT,
 	TRANSFORM,
 	BVH_NODE,
+	KDOP_NODE,
 	EMPTY
 };
 
@@ -67,6 +82,37 @@ struct bvhNode
 	bvhChild left;
 	bvhChild right;
 };
+struct K14Dop
+{
+	float min[7];
+	float max[7];
+};
+struct KDopNode // the version that will eventually get loaded on the GPU
+{
+	unsigned int packedIndexType_left;
+	unsigned int packedIndexType_right;
+
+	K14Dop kDop_left;
+	K14Dop kDop_right;
+};
+struct KDopLeaf // stored primitive with pre-calculated kDop
+{
+	PrimType type;
+	int index;
+	glm::vec3 center;
+	K14Dop kDop;
+};
+
+struct K14DopNodeCold
+{
+	glm::vec4 min[KDOP_WIDTH], max[KDOP_WIDTH];
+};
+struct KDopNodeHot
+{
+	glm::vec4 min_packed[KDOP_WIDTH]; // w is packed index/type
+	glm::vec4 max[KDOP_WIDTH]; // w reserved
+};
+
 
 struct bvhPacked
 {
@@ -81,6 +127,7 @@ struct LeafItem
 	glm::vec3 min, max, center;
 	PrimType type;
 	int index;
+	
 };
 
 struct Material
@@ -139,7 +186,8 @@ struct ShaderData
 	glm::vec4 backgroundColor = glm::vec4(0.3, 0.5, 1.0, 1.0);
 	Camera camera;
 	unsigned int bvhRoot;
-	bool resetRays;
+	unsigned int rootType;
+	unsigned int resetRays;
 	glm::vec3 camDir;
 	int bounceCount;
 };
@@ -247,15 +295,136 @@ static inline glm::vec3 make_aabb_min(glm::vec3 p1, glm::vec3 p2)
 	);
 }
 
+K14Dop makeEmptyKDop()
+{
+	K14Dop kdop;
+	for (int i = 0; i < KDOP_AXIS_COUNT; ++i)
+	{
+		kdop.min[i] = FLT_MAX;
+		kdop.max[i] = -FLT_MAX;
+	}
+	return kdop;
+}
+
+K14Dop mergeKDop(const K14Dop& a, const K14Dop& b)
+{
+	K14Dop result;
+
+	for (int i = 0; i < KDOP_AXIS_COUNT; ++i)
+	{
+		result.min[i] = std::min(a.min[i], b.min[i]);
+		result.max[i] = std::max(a.max[i], b.max[i]);
+	}
+	return result;
+}
+
 static inline float surfaceArea(const glm::vec3& extent)
 {
 	glm::vec3 e = make_aabb_max(extent, glm::vec3(0.f));
 	return 2.f * (e.x * e.y + e.y * e.z + e.z * e.x);
 }
 
+static inline void kdopGetAABB(const K14Dop& kdop, glm::vec3& outMax, glm::vec3& outMin)
+{
+	for (int i = 0; i < 8; ++i)
+	{
+		outMax = make_aabb_max(outMax, KDOP_DIRECTIONS[i] * kdop.max[i]);
+		outMin = make_aabb_min(outMin, KDOP_DIRECTIONS[i] * kdop.min[i]);
+	}
+}
+inline float dot_n3(const glm::vec3& v) { return  v.x + v.y + v.z; } // (1,1,1)
+inline float dot_n4(const glm::vec3& v) { return  v.x + v.y - v.z; } // (1,1,-1)
+inline float dot_n5(const glm::vec3& v) { return  v.x - v.y + v.z; } // (1,-1,1)
+inline float dot_n6(const glm::vec3& v) { return  v.x - v.y - v.z; } // (1,-1,-1)
+
+static inline float kdopSAHCost(const K14Dop& kdop)
+{
+	glm::vec3 aabbMax(-FLT_MAX), aabbMin(FLT_MAX);
+	kdopGetAABB(kdop, aabbMax, aabbMin);
+	glm::vec3 diag = aabbMax - aabbMin;
+	float aabbSA = surfaceArea(diag);
+	/*
+	kdop indicies
+	0 : x
+	1 : y
+	2 : z
+	3-7 diag
+	
+	
+	*/
+	float d[8];
+	glm::vec3 kdop_aabb_max(kdop.max[0], kdop.max[1], kdop.max[2]);
+	glm::vec3 kdop_aabb_min(kdop.min[0], kdop.min[1], kdop.min[2]);
+
+	d[0] = kdop.min[3] - dot_n3(kdop_aabb_min);
+	d[1] = dot_n3(kdop_aabb_max) - kdop.max[3];
+	d[2] = kdop.min[4] - dot_n4(kdop_aabb_min);
+	d[3] = dot_n4(kdop_aabb_max) - kdop.max[4];
+	d[4] = kdop.min[5] - dot_n5(kdop_aabb_min);
+	d[5] = dot_n5(kdop_aabb_max) - kdop.max[5];
+	d[6] = kdop.min[6] - dot_n6(kdop_aabb_min);
+	d[7] = dot_n6(kdop_aabb_max) - kdop.max[6];
+
+	constexpr float kCornerConst = 1.9019237886466845f; // (9 - 3*sqrt(3)) / 2
+	constexpr float kCorrConst = 0.2679491924311227f; // 2 - sqrt(3)
+	constexpr float kSqrt3 = 1.7320508075688772f;
+
+
+	float cornerArea = 0.0f;
+	for (int i = 0; i < 8; ++i) cornerArea += d[i] * d[i];
+	
+	cornerArea *= kCornerConst;
+
+
+	// Eq. 3/4: correction for pairwise overlap of cuts along each of the 12 AABB edges.
+	float s[12];
+	s[0] = std::max(0.0f, d[0] + d[7] - diag.x);
+	s[1] = std::max(0.0f, d[1] + d[6] - diag.x);
+	s[2] = std::max(0.0f, d[2] + d[5] - diag.x);
+	s[3] = std::max(0.0f, d[3] + d[4] - diag.x);
+	s[4] = std::max(0.0f, d[0] + d[4] - diag.y);
+	s[5] = std::max(0.0f, d[1] + d[5] - diag.y);
+	s[6] = std::max(0.0f, d[2] + d[6] - diag.y);
+	s[7] = std::max(0.0f, d[3] + d[7] - diag.y);
+	s[8] = std::max(0.0f, d[0] + d[2] - diag.z);
+	s[9] = std::max(0.0f, d[1] + d[3] - diag.z);
+	s[10] = std::max(0.0f, d[4] + d[6] - diag.z);
+	s[11] = std::max(0.0f, d[5] + d[7] - diag.z);
+
+	float cornerCorrection = 0.0f;
+	for (int i = 0; i < 12; ++i) cornerCorrection += s[i] * s[i];
+	cornerCorrection *= kCorrConst;
+
+	return aabbSA - cornerArea + cornerCorrection;
+}
+
+static inline K14Dop kdopFromGaussianSplat(const glm::vec3& center, const glm::mat3& rotation, const glm::vec3& scale, float kSigma)
+{
+	K14Dop dop;
+	for (int i = 0; i < 7; ++i)
+	{
+		const glm::vec3& n = KDOP_DIRECTIONS[i];
+		glm::vec3 localN = glm::transpose(rotation) * n;
+		float extent = kSigma * glm::length(scale * localN);
+		float centerProj = glm::dot(center, n);
+		dop.min[i] = centerProj - extent;
+		dop.max[i] = centerProj + extent;
+	}
+	return dop;
+}
+
 static inline unsigned int packChild(PrimType type, int index)
 {
 	return (unsigned int(type) << 28) | (unsigned int(index) & 0x0FFFFFFFu);
+}
+
+int unpackIndex(unsigned int packed)
+{
+	return int(packed & 0x0FFFFFFFu);
+}
+PrimType unpackType(unsigned int packed)
+{
+	return PrimType(packed >> 28);
 }
 
 static inline int BuildBVHRecursive(std::vector<bvhNode>& nodes, int begin, int end)

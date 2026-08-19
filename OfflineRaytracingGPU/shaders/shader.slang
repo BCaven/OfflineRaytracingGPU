@@ -39,7 +39,7 @@ float4 main(VSOutput input)
     init_rng(input.Pos.xy, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount);
     int rayIndex = (int)(input.Pos.x + (input.Pos.y * shaderData.windowMax.x));
 
-    if (shaderData.resetRays)
+    if ((bool) shaderData.resetRays)
     {
         float3 origin = shaderData.camera.origin;
         float focus_distance = 1.0;
@@ -56,12 +56,12 @@ float4 main(VSOutput input)
         reset_ray(rayIndex, origin, direction);
     }
 
-    bool lambertianLighting = shaderData.resetRays && shaderData.frameCount == 0;
+    bool lambertianLighting = (bool) shaderData.resetRays && shaderData.frameCount == 0;
     // TODO remove this redundant calc
     float2 uv = input.Pos.xy / shaderData.windowMax;
     float4 historyColor = previousFrame.Sample(uv);
     float weight = 1.0 / (shaderData.frameCount + 1.0);
-    float4 radianceSample = ray_color(rayIndex, shaderData.bvhRoot, shaderData.camDir, lambertianLighting, shaderData.backgroundColor);
+    float4 radianceSample = ray_color(rayIndex, shaderData.bvhRoot, bit_cast<PrimType>(shaderData.rootType), shaderData.camDir, lambertianLighting, shaderData.backgroundColor);
     
     float4 outColor = lerp(historyColor, radianceSample, weight);
 

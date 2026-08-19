@@ -72,6 +72,16 @@ int main()
 	//int readingroomIndex = wrapper.loadSplat("assets/readingroom_20x_180.ply");
 
 	int tomatoIndex = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
+
+	for (int i = tomatoIndex; i > tomatoIndex - 8; i--)
+	{
+		const auto& t = wrapper.kdopNodes[i];
+		std::cout << "CPU binary kdop index: " << i <<
+			"\naabb left min: " << t.kDop_left.min[0] << ", " << t.kDop_left.min[1] << ", " << t.kDop_left.min[2] <<
+			"\naabb left max: " << t.kDop_left.max[0] << ", " << t.kDop_left.max[1] << ", " << t.kDop_left.max[2] <<
+			"\naabb right min: " << t.kDop_right.min[0] << ", " << t.kDop_right.min[1] << ", " << t.kDop_right.min[2] <<
+			"\naabb right max: " << t.kDop_right.max[0] << ", " << t.kDop_right.max[1] << ", " << t.kDop_right.max[2] << "\n";
+	}
 	//std::cout << "Tomato BVH (root node: " << tomatoIndex << ")\n";
 	//wrapper.printBVH(tomatoIndex, 2);
 	//wrapper.validateBVH(tomatoIndex);
@@ -93,10 +103,37 @@ int main()
 		//wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * radius), 3, offset + (std::cos(r) * radius)), glm::vec3(0, 0, 0), glm::vec3(1), PrimType::BVH_NODE, suzanneIndex);
 	}
 
-	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, readingroomIndex);
-	wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
+	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, readingroomIndex);	
+	wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::KDOP_NODE, tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
+	for (int i = (int)wrapper.kdopHotNodes.size() - 1; i > (int)wrapper.kdopHotNodes.size() - 8; i--)
+	{
+		std::cout << "kdot hot node index: " << i << "\n";
+		const auto& n = wrapper.kdopHotNodes[i];
+		for (int i = 0; i < KDOP_WIDTH; ++i)
+		{
+			unsigned int packed =
+				std::bit_cast<unsigned int>(n.min_packed[i].w);
+
+			PrimType type = unpackType(packed);
+			int childIndex = unpackIndex(packed);
+
+			std::cout
+				<< "slot " << i
+				<< " type " << type
+				<< " index " << childIndex
+				<< " min=("
+				<< n.min_packed[i].x << ", "
+				<< n.min_packed[i].y << ", "
+				<< n.min_packed[i].z << ")"
+				<< " max=("
+				<< n.max[i].x << ", "
+				<< n.max[i].y << ", "
+				<< n.max[i].z << ")"
+				<< ")\n";
+		}
+	}
 
 	std::cout << "Number of splats: " << wrapper.splats.size() << "\n";
 
@@ -115,6 +152,7 @@ int main()
 	wrapper.init();
 
 	wrapper.shaderData.bvhRoot = root;
+	wrapper.shaderData.rootType = PrimType::BVH_NODE;
 	bool running = true;
 	while (running)
 	{

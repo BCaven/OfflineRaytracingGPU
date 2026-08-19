@@ -9,7 +9,7 @@
 constexpr uint32_t maxBounces{ 10 };
 constexpr uint32_t maxFramesInFlight{ 2 };
 constexpr uint32_t numHistoryFrames{ 2 };
-constexpr uint32_t objectTypes{ 8 };
+constexpr uint32_t objectTypes{ 10 };
 constexpr glm::vec3 WORLD_UP{ 0, 1, 0 };
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -157,6 +157,9 @@ public:
 	std::vector<Transform> transforms;
 	std::vector<SphericalHarmonic> shMats;
 	std::vector<Ray> rayOrigins;
+	std::vector<KDopNode> kdopNodes;
+	std::vector<KDopNodeHot> kdopHotNodes;
+	std::vector<K14DopNodeCold> kdopColdNodes;
 	CameraWrapper camera;
 	ShaderData shaderData{};
 
@@ -296,9 +299,12 @@ public:
 
 		loadStructuredBuffer("bvhNodes", bvhNodesPacked);
 
-		loadStructuredBuffer("transforms", transforms);
+		std::cout << "kdop size: " << kdopHotNodes.size() << "\n";
 
-		std::cout << "Making ray buffer with " << windowSize.x * windowSize.y << "\n";
+		loadStructuredBuffer("kdopHotNodes", kdopHotNodes);
+		loadStructuredBuffer("kdopColdNodes", kdopColdNodes);
+
+		loadStructuredBuffer("transforms", transforms);
 
 		loadStructuredBuffer("rays", rayOrigins, windowSize.x * windowSize.y);
 
@@ -322,6 +328,9 @@ public:
 		updateStructuredBufferDescriptors("materials");
 		
 		updateStructuredBufferDescriptors("bvhNodes");
+
+		updateStructuredBufferDescriptors("kdopHotNodes");
+		updateStructuredBufferDescriptors("kdopColdNodes");
 		
 		updateStructuredBufferDescriptors("transforms");
 
@@ -1282,6 +1291,26 @@ public:
 				max = make_aabb_max(max, c.right.max);
 			}
 		}
+		else if (prim == KDOP_NODE)
+		{
+			const auto& c = kdopNodes[transform.childIndex];
+			PrimType left = unpackType(c.packedIndexType_left);
+			PrimType right = unpackType(c.packedIndexType_right);
+			if (left != PrimType::EMPTY)
+			{
+				glm::vec3 aabbMin(c.kDop_left.min[0], c.kDop_left.min[1], c.kDop_left.min[2]);
+				glm::vec3 aabbMax(c.kDop_left.max[0], c.kDop_left.max[1], c.kDop_left.max[2]);
+				min = make_aabb_min(min, aabbMin);
+				max = make_aabb_max(max, aabbMax);
+			}
+			if (right != PrimType::EMPTY)
+			{
+				glm::vec3 aabbMin(c.kDop_right.min[0], c.kDop_right.min[1], c.kDop_right.min[2]);
+				glm::vec3 aabbMax(c.kDop_right.max[0], c.kDop_right.max[1], c.kDop_right.max[2]);
+				min = make_aabb_min(min, aabbMin);
+				max = make_aabb_max(max, aabbMax);
+			}
+		}
 		else 
 		{
 			throw std::runtime_error("Not a supported type: " + transform.childPrim);
@@ -1312,6 +1341,150 @@ public:
 			sceneMin = make_aabb_min(leftMin, sceneMin);
 			sceneMax = make_aabb_max(leftMax, sceneMax);
 		}
+	}
+
+	int flattenKDop(int rootIndex)
+	{
+		struct FrontierChild
+		{
+			unsigned int packed;
+			K14Dop kdop;
+		};
+		const KDopNode& root = kdopNodes[rootIndex];
+		std::vector<FrontierChild> frontier;
+		frontier.reserve(KDOP_WIDTH);
+
+		frontier.push_back(FrontierChild{
+			.packed = root.packedIndexType_left,
+			.kdop = root.kDop_left
+			});
+		frontier.push_back(FrontierChild{
+			.packed = root.packedIndexType_right,
+			.kdop = root.kDop_right
+			});
+
+		while (frontier.size() < KDOP_WIDTH)
+		{
+			int bestCandidate = -1;
+			float bestDelta = FLT_MAX;
+
+			for (int i = 0; i < (int)frontier.size(); ++i)
+			{
+				const FrontierChild& candidate = frontier[i];
+				PrimType type = unpackType(candidate.packed);
+
+				if (type != PrimType::KDOP_NODE)
+				{
+					continue;
+				}
+
+				int childIndex = unpackIndex(candidate.packed);
+				const KDopNode& binaryChild = kdopNodes[childIndex];
+				float oldCost = kdopSAHCost(candidate.kdop);
+
+				float newCost =
+					kdopSAHCost(binaryChild.kDop_left) +
+					kdopSAHCost(binaryChild.kDop_right);
+
+				float delta = newCost - oldCost;
+
+				if (delta < bestDelta)
+				{
+					bestDelta = delta;
+					bestCandidate = i;
+				}
+			}
+			if (bestCandidate == -1)
+			{
+				break;
+			}
+			FrontierChild candidate = frontier[bestCandidate];
+
+			int childIndex = unpackIndex(candidate.packed);
+			const KDopNode& binaryChild = kdopNodes[childIndex];
+
+			frontier[bestCandidate] = FrontierChild{
+				.packed = binaryChild.packedIndexType_left,
+				.kdop = binaryChild.kDop_left
+			};
+			if (unpackType(binaryChild.packedIndexType_right) != PrimType::EMPTY)
+			{
+				frontier.push_back(FrontierChild{
+					.packed = binaryChild.packedIndexType_right,
+					.kdop = binaryChild.kDop_right
+					});
+			}
+		}
+
+		for (FrontierChild& child : frontier)
+		{
+			PrimType type = unpackType(child.packed);
+
+			if (type != PrimType::KDOP_NODE) continue;
+
+			int binaryChildIndex = unpackIndex(child.packed);
+			int wideChildIndex = flattenKDop(binaryChildIndex);
+			child.packed = packChild(
+				PrimType::KDOP_NODE,
+				wideChildIndex
+			);
+		}
+
+		KDopNodeHot hot{};
+		K14DopNodeCold cold{};
+
+		for (int i = 0; i < KDOP_WIDTH; ++i)
+		{
+			if (i < (int)frontier.size())
+			{
+				const FrontierChild& child = frontier[i];
+				// Hot: first three axes + packed child index/type.
+				hot.min_packed[i] = glm::vec4(
+					child.kdop.min[0],
+					child.kdop.min[1],
+					child.kdop.min[2],
+					std::bit_cast<float>(child.packed)
+				);
+
+				// w is reserved.
+				hot.max[i] = glm::vec4(
+					child.kdop.max[0],
+					child.kdop.max[1],
+					child.kdop.max[2],
+					0.0f
+				);
+
+				// Cold: remaining four k-DOP axes.
+				cold.min[i] = glm::vec4(
+					child.kdop.min[3],
+					child.kdop.min[4],
+					child.kdop.min[5],
+					child.kdop.min[6]
+				);
+
+				cold.max[i] = glm::vec4(
+					child.kdop.max[3],
+					child.kdop.max[4],
+					child.kdop.max[5],
+					child.kdop.max[6]
+				);
+			}
+			else
+			{
+				// empty slot
+				float packed = std::bit_cast<float>(packChild(PrimType::EMPTY, 0));
+				hot.min_packed[i] = glm::vec4(FLT_MAX, FLT_MAX, FLT_MAX, packed);
+				hot.max[i] = glm::vec4(-FLT_MAX);
+
+				cold.min[i] = glm::vec4(FLT_MAX);
+				cold.max[i] = glm::vec4(-FLT_MAX);
+			}
+		}
+
+		int wideIndex = (int)kdopHotNodes.size();
+		kdopHotNodes.push_back(hot);
+		kdopColdNodes.push_back(cold);
+		return wideIndex;		
 	}
 
 	void packBvhNodes()
@@ -1378,6 +1551,109 @@ public:
 		return root;
 	}
 
+	int build14DOP(std::vector<KDopLeaf>& leaves, int start, int end, K14Dop& outKDop)
+	{
+		int count = end - start;
+		if (count <= 2)
+		{
+			K14Dop leftKDop = leaves[start].kDop;
+			unsigned int leftPacked = packChild(leaves[start].type, leaves[start].index);
+			K14Dop rightKDop = makeEmptyKDop();
+			unsigned int rightPacked = packChild(PrimType::EMPTY, 0);
+			if (count == 2)
+			{
+				rightKDop = leaves[start + 1].kDop;
+				rightPacked = packChild(leaves[start + 1].type, leaves[start + 1].index);
+			}
+
+			K14Dop mergedKDop = mergeKDop(leftKDop, rightKDop);
+			outKDop = mergedKDop;
+			kdopNodes.push_back(KDopNode{
+				.packedIndexType_left = leftPacked,
+				.packedIndexType_right = rightPacked,
+				.kDop_left = leftKDop,
+				.kDop_right = rightKDop
+				});
+			return (int)kdopNodes.size() - 1;
+		}
+		// find centroid spread
+		glm::vec3 cMin(FLT_MAX);
+		glm::vec3 cMax(-FLT_MAX);
+
+		for (int i = start; i < end; ++i)
+		{
+			cMin = make_aabb_min(leaves[i].center, cMin);
+			cMax = make_aabb_max(leaves[i].center, cMax);
+		}
+
+		// pick axis
+
+		glm::vec3 ext = cMax - cMin;
+		int axis = (ext.x > ext.y)
+			? (ext.x > ext.z ? 0 : 2)
+			: (ext.y > ext.z ? 1 : 2);
+
+		// sort along axis
+		std::sort(
+			leaves.begin() + start,
+			leaves.begin() + end,
+			[axis](const KDopLeaf& a, const KDopLeaf& b)
+			{
+				return a.center[axis] < b.center[axis];
+			}
+		);
+		// try split locations
+		int bestSplit = start + count / 2;
+		float bestCost = FLT_MAX;
+
+		int buckets = std::min(count - 1, 16);
+		for (int b = 1; b <= buckets; ++b)
+		{
+			int split = start + (count * b) / (buckets + 1);
+			if (split <= start || split >= end) continue;
+
+			K14Dop leftKDop = makeEmptyKDop();
+			K14Dop rightKDop = makeEmptyKDop();
+
+			for (int i = start; i < split; ++i)
+			{
+				leftKDop = mergeKDop(leftKDop, leaves[i].kDop);
+			}
+			for (int i = split; i < end; ++i)
+			{
+				rightKDop = mergeKDop(rightKDop, leaves[i].kDop);
+			}
+
+			float leftCount = float(split - start);
+			float rightCount = float(end - split);
+
+			float cost = kdopSAHCost(leftKDop) * leftCount + kdopSAHCost(rightKDop) * rightCount;
+
+			if (cost < bestCost)
+			{
+				bestCost = cost;
+				bestSplit = split;
+			}
+		}
+		
+		// recursively build children
+		K14Dop leftKDop;
+		K14Dop rightKDop;
+
+		int leftIndex = build14DOP(leaves, start, bestSplit, leftKDop);
+		int rightIndex = build14DOP(leaves, bestSplit, end, rightKDop);
+
+		outKDop = mergeKDop(leftKDop, rightKDop);
+
+		kdopNodes.push_back(KDopNode{
+			.packedIndexType_left = packChild(PrimType::KDOP_NODE, leftIndex),
+			.packedIndexType_right = packChild(PrimType::KDOP_NODE, rightIndex),
+			.kDop_left = leftKDop,
+			.kDop_right = rightKDop
+			});
+		return (int) kdopNodes.size() - 1;
+	}
+
 	int buildSAH(std::vector<LeafItem>& leaves, int start, int end, glm::vec3& outMin, glm::vec3& outMax)
 	{
 		float emptyBonusFactor = 0.5;
@@ -1427,7 +1703,7 @@ public:
 		for (int b = 1; b <= buckets; ++b)
 		{
 			int split = start + (count * b) / (buckets + 1);
-			if (split <= start || split >= end) continue;
+			//if (split <= start || split >= end) continue;
 
 			glm::vec3 lMin(FLT_MAX), lMax(-FLT_MAX), rMin(FLT_MAX), rMax(-FLT_MAX);
 			for (int i = start; i < split; ++i) 
@@ -1511,8 +1787,14 @@ public:
 	
 	int loadTransform(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale, PrimType childPrim, int childIndex)
 	{
-		// TODO later: only accept BVH_NODE as a child type
-		assert(childPrim == BVH_NODE);
+		assert(childPrim == BVH_NODE || KDOP_NODE);
+		int index = childIndex;
+		if (childPrim == KDOP_NODE)
+		{
+			// flatten into wide kdop before transforming
+			index = flattenKDop(childIndex);
+			validateWideKDop(index);
+		}
 
 		constexpr float MIN_SCALE = 1e-8f;
 
@@ -1534,7 +1816,7 @@ public:
 			.matrix = transformMatrix,
 			.invMatrix = glm::inverse(transformMatrix),
 			.childPrim = childPrim,
-			.childIndex = childIndex
+			.childIndex = index
 		};
 		transforms.push_back(transform);
 		return transforms.size() - 1;
@@ -1726,7 +2008,7 @@ public:
 		std::vector<unsigned char> row(rowStride);
 
 		
-		std::vector<LeafItem> leaves;
+		std::vector<KDopLeaf> leaves;
 		for (std::size_t i = 0; i < vertexCount; ++i) {
 			file.read(reinterpret_cast<char*>(row.data()), static_cast<std::streamsize>(row.size()));
 			if (!file) {
@@ -1790,7 +2072,7 @@ public:
 			S[1][1] = scale.y * scale_mod;
 			S[2][2] = scale.z * scale_mod;
 
-			float eps = 0.05;
+			float eps = 0.4;
 			float k = std::sqrt(-2.0 * std::log(eps)); // radius of ellipsoid in "S" units
 			//std::cout << "Alpha: " << alpha << "\n";
 			// ellipsoid semi-axes in world space = k * s_x, k * s_y, k * s_z along R's columns
@@ -1838,7 +2120,9 @@ public:
 				.materialIndex = matIndex,
 				.halfExtent = halfExtent
 			};
+			K14Dop dop = kdopFromGaussianSplat(center, R, scale, k);
 
+			/*
 			leaves.push_back(LeafItem{
 				.min = center - halfExtent,
 				.max = center + halfExtent,
@@ -1847,10 +2131,18 @@ public:
 				.index = (int) splats.size()
 				});
 
+			*/
+			leaves.push_back(KDopLeaf{
+				.type = PrimType::GAUSSIAN_SPLAT,
+				.index = (int) splats.size(),
+				.center = center,
+				.kDop = dop
+				});
 			splats.push_back(gs);
 		}
 
-		return buildChildBVH(leaves);
+		K14Dop outDop;
+		return build14DOP(leaves, 0, leaves.size() - 1, outDop);
 	}
 
 	void validateBVHNode(int index,	std::unordered_set<int>& visiting, std::unordered_set<int>& visited)
@@ -1927,6 +2219,54 @@ public:
 			<< " reachable nodes\n";
 		printBVH(root, depth_to_display);
 		
+	}
+
+	void validateWideKDop(int root)
+	{
+		std::vector<int> stack;
+		stack.push_back(root);
+
+		while (!stack.empty())
+		{
+			int index = stack.back();
+			stack.pop_back();
+
+			if (index < 0 || index >= (int)kdopHotNodes.size())
+			{
+				throw std::runtime_error(
+					"Invalid wide KDOP index: " +
+					std::to_string(index));
+			}
+
+			const auto& node = kdopHotNodes[index];
+
+			for (int i = 0; i < KDOP_WIDTH; ++i)
+			{
+				uint32_t packed =
+					std::bit_cast<uint32_t>(node.min_packed[i].w);
+
+				PrimType type = unpackType(packed);
+				int child = unpackIndex(packed);
+
+				if (type == PrimType::KDOP_NODE)
+				{
+					if (child < 0 ||
+						child >= (int)kdopHotNodes.size())
+					{
+						std::cerr
+							<< "INVALID WIDE CHILD\n"
+							<< "parent = " << index << "\n"
+							<< "slot = " << i << "\n"
+							<< "child = " << child << "\n";
+
+						throw std::runtime_error(
+							"Invalid KDOP child");
+					}
+
+					stack.push_back(child);
+				}
+			}
+		}
 	}
 
 	void printBVH(int root, int depth_to_display)

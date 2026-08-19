@@ -21,7 +21,8 @@ struct ShaderData
     float4 backgroundColor;
     Camera camera;
     uint bvhRoot;
-    bool resetRays;
+    uint rootType;
+    uint resetRays;
     float3 camDir;
     int bounceCount;
 };

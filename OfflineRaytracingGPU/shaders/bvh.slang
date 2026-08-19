@@ -6,6 +6,9 @@ public StructuredBuffer<GaussianSplat> splats;
 public StructuredBuffer<SphericalHarmonic> shMats;
 public StructuredBuffer<Material> materials;
 public StructuredBuffer<bvhPacked> bvhNodes;
+public StructuredBuffer<KDopNodeHot> kdopHotNodes;
+public StructuredBuffer<K14DopNodeCold> kdopColdNodes;
+
 public StructuredBuffer<Transform> transforms;
 public RWStructuredBuffer<Ray> rays;
 
@@ -21,6 +24,10 @@ PrimType unpackType(uint packed)
 int unpackIndex(uint packed)
 {
     return int(packed & 0x0FFFFFFFu);
+}
+uint packChild(PrimType type, int index)
+{
+    return (uint(type) << 28) | (uint(index) & 0x0FFFFFFFu);
 }
 
 public void init_rng(float2 pixel, int windowWidth, int frameCount)
@@ -381,6 +388,35 @@ float intersect_aabb(Ray ray, float3 min, float3 max)
     return bounds.x;
 }
 
+float2 kdop_bounds_diag(Ray ray, float4 diagMin, float4 diagMax, float tNear, float tFar)
+{
+    float tEntry = tNear;
+    float tExit = tFar;
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        float denom = dot(ray.direction, KDOP_DIRECTIONS[i + 3]);
+        float o = dot(ray.origin, KDOP_DIRECTIONS[i + 3]);
+        if (abs(denom) < EPSILON)
+        {
+            if (o < diagMin[i] || o > diagMax[i])
+            {
+                return float2(FLT_MAX);
+            }
+            continue;
+        }
+        float tA = (diagMin[i] - o) / denom;
+        float tB = (diagMax[i] - o) / denom;
+        tEntry = max(tEntry, min(tA, tB));
+        tExit = min(tExit, max(tA, tB));
+        if (tEntry > tExit || tExit < EPSILON) return float2(FLT_MAX);
+    }
+
+    float tHit = max(EPSILON, tEntry);
+
+    return float2(tHit, tExit);
+}
+
 void ProcessPrimitive(
     PrimType type,
     int index,
@@ -469,7 +505,7 @@ bool transformRay(TraversalNode node, TransformStackNode transformNode, uint tra
         return false;
     }
     float3 dir = localDirection / directionLength;
-    result.index = t.childIndex;
+    result.packedIndexType = packChild(t.childPrim, t.childIndex);
     resultTransformStack.rayOrigin = localOrigin;
     resultTransformStack.rayDirection = localDirection / directionLength;
     resultTransformStack.tScale = transformNode.tScale / directionLength;
@@ -496,26 +532,15 @@ void processChild(
     float childT
 )
 {
-    if (childIndex < 0) 
-    {
-        // oops!
-        return;
-    }
-    if (childType == PrimType::BVH_NODE)
+    if (childType == PrimType::BVH_NODE || childType == PrimType::KDOP_NODE)
     {
         // Dont push a new transform chain to the transform stack since we are just using the same one from before
         TraversalNode childNode;
-        childNode.index = childIndex;
+        childNode.packedIndexType = packChild(childType, childIndex);
         childNode.tEntry = childT;
         childNode.transformStackIndex = node.transformStackIndex;
         transformStack[node.transformStackIndex].nodesUsingThis += 1;
 
-        // From when transform stacks were tied to the traversal stack
-        // childNode.rayOrigin = node.rayOrigin;
-        // childNode.rayDirection = node.rayDirection;
-        // childNode.tScale = node.tScale;
-        //childNode.transformChain = node.transformChain;
-        //childNode.transformDepth = node.transformDepth;
         push_stack(stack, stackPtr, childNode);
     }
     else if (childType == PrimType::TRANSFORM)
@@ -548,7 +573,7 @@ void processChild(
     }
 }
 
-Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
+Intersection intersect_scene_bvh(int rayIndex, uint rootIndex, PrimType rootType)
 {
     // TODO: try this using a Rope / threaded BVH later
     /*
@@ -565,7 +590,7 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
     int iterations = 0;
     Ray startRay = rays[rayIndex];
     TraversalNode root; // = TraversalNode(rootIndex, startRay.origin, startRay.direction, 1.f, 0.f);
-    root.index = rootIndex;
+    root.packedIndexType = packChild(rootType, rootIndex);
     root.transformStackIndex = 0;
     root.tEntry = 0.f;
     TraversalNode stack[STACK_SIZE];
@@ -604,55 +629,148 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex)
         Ray intersectionRay;
         intersectionRay.direction = transformNode.rayDirection;
         intersectionRay.origin = transformNode.rayOrigin;
+        uint nodeIndex = unpackIndex(node.packedIndexType);
+        PrimType nodeType = unpackType(node.packedIndexType);
 
-        const bvhPacked current = bvhNodes[node.index];
-        float3 leftMin = current.leftMin_leftPacked.xyz;
-        float3 leftMax = current.leftMax_rightPacked.xyz;
-        float3 rightMin = current.rightMin_reserved0.xyz;
-        float3 rightMax = current.rightMax_reserved1.xyz;
-        uint leftIndex = unpackIndex(bit_cast<uint>(current.leftMin_leftPacked.w));
-        PrimType leftType = unpackType(bit_cast<uint>(current.leftMin_leftPacked.w));
-        uint rightIndex = unpackIndex(bit_cast<uint>(current.leftMax_rightPacked.w));
-        PrimType rightType = unpackType(bit_cast<uint>(current.leftMax_rightPacked.w));
-        float leftT = FLT_MAX;
-        if (leftType != PrimType::EMPTY)
+        if (nodeType == PrimType::BVH_NODE)
         {
-            leftT = transformNode.tScale * intersect_aabb(intersectionRay, leftMin, leftMax);
-        }
-        float rightT = FLT_MAX;
-        if (rightType != PrimType::EMPTY)
-        {
-            rightT = transformNode.tScale * intersect_aabb(intersectionRay, rightMin, rightMax);
-        }
-        if (leftT < rightT)
-        {
-            // push far child first
-            if (rightT < closest.t)
+            float leftT = FLT_MAX;
+            float rightT = FLT_MAX;
+            const bvhPacked current = bvhNodes[nodeIndex];
+            float3 leftMin = current.leftMin_leftPacked.xyz;
+            float3 leftMax = current.leftMax_rightPacked.xyz;
+            float3 rightMin = current.rightMin_reserved0.xyz;
+            float3 rightMax = current.rightMax_reserved1.xyz;
+            uint leftIndex = unpackIndex(bit_cast<uint>(current.leftMin_leftPacked.w));
+            PrimType leftType = unpackType(bit_cast<uint>(current.leftMin_leftPacked.w));
+            uint rightIndex = unpackIndex(bit_cast<uint>(current.leftMax_rightPacked.w));
+            PrimType rightType = unpackType(bit_cast<uint>(current.leftMax_rightPacked.w));
+            if (leftType != PrimType::EMPTY)
             {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
+                leftT = transformNode.tScale * intersect_aabb(intersectionRay, leftMin, leftMax);
             }
-            if (leftT < closest.t)
+            if (rightType != PrimType::EMPTY)
             {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
+                rightT = transformNode.tScale * intersect_aabb(intersectionRay, rightMin, rightMax);
             }
+
+            if (leftT < rightT)
+            {
+                // push far child first
+                if (rightT < closest.t)
+                {
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
+                }
+                if (leftT < closest.t)
+                {
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
+                }
+            }
+            else
+            {
+                if (leftT < closest.t)
+                {
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
+                }
+                if (rightT < closest.t)
+                {
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
+                }
+            }
+        }
+        else if (nodeType == PrimType::KDOP_NODE)
+        {
+            const KDopNodeHot hot = kdopHotNodes[nodeIndex];
+
+            uint packed[KDOP_WIDTH];
+            float childTNear[KDOP_WIDTH];
+            float childTFar[KDOP_WIDTH];
+            bool validChildren[KDOP_WIDTH];
+            bool anyCandidates = false;
+            [unroll]
+            for (int i = 0; i < KDOP_WIDTH; ++i)
+            {
+                packed[i] = bit_cast<uint>(hot.min_packed[i].w);
+                childTNear[i] = FLT_MAX;
+                childTFar[i] = -FLT_MAX;
+                validChildren[i] = false;
+            }
+
+            // check aabb before requesting full node
+            [unroll]
+            for (int i = 0; i < KDOP_WIDTH; ++i)
+            {
+                if (unpackType(packed[i]) == PrimType::EMPTY) continue;
+
+                float2 aabbLocal = aabb_bounds(intersectionRay, hot.min_packed[i].xyz, hot.max[i].xyz);
+
+                float worldT = transformNode.tScale * aabbLocal.x;
+
+                if (worldT >= closest.t) continue;
+
+                childTNear[i] = aabbLocal.x;
+                childTFar[i] = aabbLocal.y;
+
+                validChildren[i] = true;
+
+                anyCandidates = true;
+            }
+
+            if (anyCandidates)
+            {
+                const K14DopNodeCold cold = kdopColdNodes[nodeIndex];
+
+                [unroll]
+                for (int i = 0; i < KDOP_WIDTH; ++i)
+                {
+
+
+                    if (childTNear[i] == FLT_MAX) continue;
+
+                    if (validChildren[i] == false) continue; // node is already invalid from AABB
+
+                    float2 kdopLocal_i = kdop_bounds_diag(intersectionRay,
+                        cold.min[i], cold.max[i], childTNear[i], childTFar[i]);
+
+                    childTNear[i] = kdopLocal_i.x;
+                    childTFar[i] = kdopLocal_i.y;
+
+                    float worldNear_i2 = transformNode.tScale * kdopLocal_i.x;
+
+                    if (worldNear_i2 > closest.t)
+                    {
+                        validChildren[i] = false;
+                    }
+
+                }
+
+                // push everyone who is still valid
+                [unroll]
+                for (int i = 0; i < KDOP_WIDTH; ++i)
+                {
+                    if (validChildren[i] == false) continue;
+
+                    uint stackIndex = unpackIndex(packed[i]);
+                    PrimType type = unpackType(packed[i]);
+                    float worldNear_i = transformNode.tScale * childTNear[i];
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, stackIndex, type, worldNear_i);
+                }
+             }
         }
         else
         {
-            if (leftT < closest.t)
-            {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
-            }
-            if (rightT < closest.t)
-            {
-                processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
-            }
+            // dead node somehow?
+            // I don't think this code is possible in a procedural stack with procedural nodes
+            releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
+            continue;
         }
+        
         releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
     }
     return closest;
 }
 
-public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor)
+public float4 ray_color(int rayIndex, uint bvhRoot, PrimType rootType, float3 camDir, bool firstBounceDebug, float4 backgroundColor)
 {
     Ray ray = rays[rayIndex];
     float4 throughputScatter = ray.scatter;
@@ -660,7 +778,7 @@ public float4 ray_color(int rayIndex, uint bvhRoot, float3 camDir, bool firstBou
     float4 radianceSample = throughputScatter * throughputEmission;
 
     // TODO: obv this fails if there is no BVH
-    Intersection intersection = intersect_scene_bvh(rayIndex, bvhRoot);
+    Intersection intersection = intersect_scene_bvh(rayIndex, bvhRoot, rootType);
     if (!valid_intersection(intersection))
     {
         return throughputScatter * (throughputEmission + sky_color(ray, backgroundColor));

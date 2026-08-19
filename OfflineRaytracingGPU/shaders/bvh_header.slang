@@ -5,7 +5,7 @@ public static const float EPSILON = 1e-3;
 public static const float TWO_PI = 6.2831853;
 public static const float4 GLASS_F0 = float4(0.04);
 
-static const uint STACK_SIZE = 64;
+static const uint STACK_SIZE = 512;
 static const uint TRANSFORM_STACK_SIZE = 24;
 
 public static const float SPLAT_CUTOFF = 8.;
@@ -105,6 +105,7 @@ public enum PrimType : uint
     GAUSSIAN_SPLAT,
     TRANSFORM,
     BVH_NODE,
+    KDOP_NODE,
     EMPTY
 };
 
@@ -114,6 +115,30 @@ public struct bvhPacked
     float4 leftMax_rightPacked; // xyz left.max, w = packed right.type / right.index
     float4 rightMin_reserved0; // xyz right.min, w unused
     float4 rightMax_reserved1; // same
+};
+
+public static const float invSqrt3 = 0.57735026919;
+public static const float3 KDOP_DIRECTIONS[7] =
+{
+	{ 1, 0, 0 },
+    { 0, 1, 0 },
+    { 0, 0, 1 },
+    { invSqrt3, invSqrt3, invSqrt3 },
+    { invSqrt3, invSqrt3, -invSqrt3 },
+    { invSqrt3, -invSqrt3, invSqrt3 },
+    { invSqrt3, -invSqrt3, -invSqrt3 }
+};
+
+public static const int KDOP_WIDTH = 8;
+
+public struct K14DopNodeCold
+{
+    float4 min[KDOP_WIDTH], max[KDOP_WIDTH];
+};
+public struct KDopNodeHot
+{
+    float4 min_packed[KDOP_WIDTH]; // w is packed index/type
+    float4 max[KDOP_WIDTH];        // w reserved
 };
 
 public struct Transform
@@ -137,16 +162,9 @@ Everything else could be stored in a different buffer that tracks transforms
 static const uint MAX_TRANSFORM_DEPTH = 4;
 struct TraversalNode
 {
-    uint index;
+    uint packedIndexType;
     float tEntry;
     uint transformStackIndex;
-
-    // previously in the traversal node:
-    //float3 rayOrigin;
-    //float3 rayDirection;
-    //float tScale;
-    //uint transformDepth = 0;
-    //uint transformChain[MAX_TRANSFORM_DEPTH];
 }
 
 struct TransformStackNode
