@@ -37,7 +37,7 @@ uint intersectKDopChildren(
     float3 rayOrigin,
     float3 rayDirection,
     float tMax,
-                           float tScale,
+    float tScale,
     out float tHit[KDOP_WIDTH])
 {
     Ray localRay;
@@ -110,8 +110,6 @@ uint sortChildrenByDistance(uint validMask, float tHit[KDOP_WIDTH], out uint sor
         }
     }
 
-    // insertion sort by tHit ascending; count <= KDOP_WIDTH, so worst case
-    // is 28 compares -- cheap, and the branch pattern is short/predictable
     for (uint i = 1; i < count; ++i)
     {
         uint key = sortedSlots[i];
@@ -158,6 +156,7 @@ bool transformRayShortStack(ShortStackNode node, TransformStackNode transformNod
     return true;
 }
 
+// TODO: this might be unnecessary.
 int findNextParentLevel(RestartTrailEntry trail[RESTART_TRAIL_SIZE], uint level)
 {
     for (int i = (int)level - 1; i >= 0; --i)
@@ -174,73 +173,97 @@ bool popTraversal(
     inout RestartTrailEntry trail[RESTART_TRAIL_SIZE],
     inout uint level,
     inout uint currentSlot,
-                  inout float currentTEntry,
+    inout float currentTEntry,
+
     inout ShortStackNode stack[SHORT_STACK_SIZE],
     inout uint stackPtr,
-                  inout uint packedIndexType,
-    inout uint transformIdx,
-                  inout TransformStackNode transformStack[TRANSFORM_STACK_SIZE],
-    inout uint transformStackPtr,
-                  Ray startRay, uint rootIndex, PrimType rootType,
+
+    inout uint packedIndexType,
+
+    Ray startRay,
+    uint rootIndex,
+    PrimType rootType,
+
     Intersection closest)
 {
-    while (true)
-    {
-        int parentLevel = findNextParentLevel(trail, level);
-        if (parentLevel < 0)
-            return true; // nothing pending anywhere -- fully done
 
-        trail[parentLevel].childMask &= ~(1u << currentSlot);
+    if (level == 0)
+        return true;
+
+    uint currentParentLevel = level - 1;
+
+    // The current child has now been completely processed.
+    trail[currentParentLevel].childMask &= ~(1u << currentSlot);
+
+    // Everything below the parent is stale.
+    for (uint i = currentParentLevel + 1; i < RESTART_TRAIL_SIZE; ++i)
+    {
+        trail[i].nodeIndex = INVALID_NODE;
+        trail[i].childMask = 0u;
+    }
+
+    while (stackPtr > 0)
+    {
+        ShortStackNode top = stack[--stackPtr];
+
+        uint parentLevel = top.parentLevel;
+        uint parentSlot = top.parentSlot;
+
+        // The stack entry is now becoming the current node.
+        //
+        // IMPORTANT:
+        // Do NOT clear its trail bit here.
+        //
+        // The bit means "this child still needs to be completed".
+        // It remains set while this child is current, and is cleared
+        // when this subtree eventually finishes.
+        //
+        // If the entry is culled, however, it is completely finished,
+        // so clear it immediately.
+        if (top.tEntry >= closest.t)
+        {
+            trail[parentLevel].childMask &= ~(1u << parentSlot);
+
+            for (uint i = parentLevel + 1; i < RESTART_TRAIL_SIZE; ++i)
+            {
+                trail[i].nodeIndex = INVALID_NODE;
+                trail[i].childMask = 0u;
+            }
+
+            continue;
+        }
+
+        // Everything below this parent belongs to the subtree we are
+        // about to enter, so it must be reset.
         for (uint i = parentLevel + 1; i < RESTART_TRAIL_SIZE; ++i)
         {
             trail[i].nodeIndex = INVALID_NODE;
             trail[i].childMask = 0u;
         }
 
-        if (stackPtr == 0)
-        {
-            TransformStackNode freshIdentity;
-            freshIdentity.tScale = 1.f;
-            freshIdentity.rayDirection = startRay.direction;
-            freshIdentity.rayOrigin = startRay.origin;
-            freshIdentity.transformDepth = 0;
-            freshIdentity.nodesUsingThis = 1;
-
-            packedIndexType = packChild(rootType, rootIndex);
-            transformIdx = 0;
-            transformStack[0].nodesUsingThis++;
-            level = 0;
-            currentSlot = 0;
-            currentTEntry = 0.f;
-            return false;
-        }
-
-        ShortStackNode top = stack[--stackPtr];
-
-        // stack culling: a closer hit may have been found while this sat
-        // on the short stack -- if so, it's dead, keep popping
-        if (top.tEntry >= closest.t)
-        {
-            releaseTransformEntry(transformStack, transformStackPtr, top.transformStackIndex);
-            level = parentLevel + 1;
-            currentSlot = top.parentSlot;
-            continue;
-        }
-
         packedIndexType = top.packedIndexType;
-        transformIdx = top.transformStackIndex;
-        currentSlot = top.parentSlot;
+
+        currentSlot = parentSlot;
         currentTEntry = top.tEntry;
         level = parentLevel + 1;
+
         return false;
     }
+
+    // stack is empty
+    packedIndexType = packChild(rootType, rootIndex);
+    level = 0;
+    currentSlot = 0;
+    currentTEntry = 0.f;
+
+    return false;
 }
 
 void resolveCandidate(
     KDopNodeHot node, uint slot, float childT, uint parentTransformIdx,
-                      inout TransformStackNode transformStack[TRANSFORM_STACK_SIZE],
+    inout TransformStackNode transformStack[TRANSFORM_STACK_SIZE],
     inout uint transformStackPtr,
-                      out uint outPackedIndexType,
+    out uint outPackedIndexType,
     out uint outTransformIdx)
 {
     uint childI = unpackIndex(bit_cast<uint>(node.min_packed[slot].w));
@@ -294,170 +317,121 @@ Intersection intersect_scene_short_stack(int rayIndex, uint rootIndex, PrimType 
         intersectPrimitive
         exit = pop
     */
-    int iterations = 0;
-    Ray startRay = rays[rayIndex];
+
+    bool exit = false;
+    uint iterations = 0;
+
+    ShortStackNode stack[SHORT_STACK_SIZE];
+    int stackPtr = 0;
+
+    uint trail[RESTART_TRAIL_SIZE];
+    // set trail to 0
+    [[unroll]]
+    for (int i = 0; i < RESTART_TRAIL_SIZE; i++)
+    {
+        trail[i] = 0;
+    }
+
+    // current starts as root
+    ShortStackNode current;
+    current.packedIndexType = packChild(rootType, rootIndex);
+
+    Ray currentRay = rays[rayIndex];
 
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
 
-    ShortStackNode stack[SHORT_STACK_SIZE];
-    uint stackPtr = 0;
+    TransformStackNode identity;
+    int level = 0;
 
-    RestartTrailEntry trail[RESTART_TRAIL_SIZE];
-    for (uint i = 0; i < RESTART_TRAIL_SIZE; ++i)
+    while (!exit && iterations < MAX_TRAVERSALS)
     {
-        trail[i].nodeIndex = INVALID_NODE;
-        trail[i].childMask = 0u;
-    }
-
-    TransformStackNode transformStack[TRANSFORM_STACK_SIZE];
-    uint transformStackPtr = 0;
-    TransformStackNode identityTransform;
-    identityTransform.tScale = 1.f;
-    identityTransform.rayDirection = startRay.direction;
-    identityTransform.rayOrigin = startRay.origin;
-    identityTransform.transformDepth = 0;
-    identityTransform.nodesUsingThis = 1;
-    transformStack[transformStackPtr++] = identityTransform;
-
-    uint level = 0;
-    uint packedIndexType = packChild(rootType, rootIndex);
-    uint transformIdx = 0;
-    uint currentSlot = 0;
-    float currentTEntry = 0.f;
-
-    bool done = false;
-    while (!done && iterations < MAX_TRAVERSALS)
-    {
-        iterations++;
-
-        if (currentTEntry >= closest.t)
+        // unpack current node
+        PrimType currentType = unpackType(current.packedIndexType);
+        int currentIndex = unpackIndex(current.packedIndexType);
+        if (currentType == PrimType::KDOP_NODE)
         {
-            releaseTransformEntry(transformStack, transformStackPtr, transformIdx);
-            done = popTraversal(trail, level, currentSlot, currentTEntry, stack, stackPtr,
-                                 packedIndexType, transformIdx, transformStack, transformStackPtr,
-                                 startRay, rootIndex, rootType, closest);
-            continue;
-        }
+            // 8 wide kDOP
+            // k <- trail[level]
+            uint k = trail[level];
+            KDopNodeHot hot = kdopHotNodes[currentIndex];
+            // TODO later: add transforms in once traversal works as expected.
+            float3 currentRayDir = currentRay.direction;
+            float3 currentRayOrigin = currentRay.origin;
+            // H = children that intersect ray
+            float[KDOP_WIDTH] tHit;
+            // validChildrenMask = 1 for valid child, 0 for invalid. If the entire mask is 0 no children were valid
+            uint validChildrenMask = intersectKDopChildren(currentIndex, hot, currentRayOrigin, currentRayDir, current.tEntry, 1, tHit);
+            
+            // S = H sorted by increasing hit distance
+            uint[KDOP_WIDTH] sortedIndexes;
+            uint lenSorted = sortChildrenByDistance(validChildrenMask, tHit, sortedIndexes);
 
-        uint nodeIndex = unpackIndex(packedIndexType);
-        PrimType nodeType = unpackType(packedIndexType);
-
-        TransformStackNode xf = transformStack[transformIdx];
-
-        // TODO: remember to support binary aabb-bvh nodes too :)
-        if (nodeType != PrimType::KDOP_NODE)
-        {
-            // this shouldnt happen
-            done = popTraversal(trail, level, currentSlot, currentTEntry, stack, stackPtr,
-                                 packedIndexType, transformIdx, transformStack, transformStackPtr,
-                                 startRay, rootIndex, rootType, closest);
-            continue;
-        }
-
-        // KDOP nodes:
-        KDopNodeHot node = kdopHotNodes[nodeIndex];
-
-        float tHit[KDOP_WIDTH];
-        uint validMask = intersectKDopChildren(nodeIndex, node, xf.rayOrigin, xf.rayDirection, closest.t, xf.tScale, tHit);
-
-        uint sortedSlots[KDOP_WIDTH];
-        uint hitCount = sortChildrenByDistance(validMask, tHit, sortedSlots);
-
-        uint candidateMask = 0u;
-
-        for (uint s = 0; s < hitCount; ++s)
-        {
-            uint slot = sortedSlots[s];
-            if (tHit[slot] >= closest.t) continue;
-
-            uint childI = unpackIndex(bit_cast<uint>(node.min_packed[slot].w));
-            PrimType childT = unpackType(bit_cast<uint>(node.min_packed[slot].w));
-
-            // this is the resolve primitive check
-            if (childT != PrimType::KDOP_NODE && childT != PrimType::TRANSFORM)
+            // if k = N:
+            //      Q = last entry in S
+            // else:
+            //      Q = S[k:] <- last k+1 entries in S
+            float[KDOP_WIDTH] Q;
+            uint lenQ = 0;
+            if (k == LAST_CHILD)
             {
-                Ray intersectionRay;
-                intersectionRay.origin = xf.rayOrigin;
-                intersectionRay.direction = xf.rayDirection;
-
-                // TODO: redo this function header to only pass what we need :)
-                ProcessPrimitive(childT, childI, intersectionRay, closest, xf);
+                Q[0] = sortedIndexes[lenSorted - 1];
+                lenQ = 1;
             }
             else
             {
-                candidateMask |= (1u << slot);
+                for (int i = k + 1; i < lenSorted; i++)
+                {
+                    int indexQ = i - (k + 1);
+                    Q[indexQ] = sortedIndexes[i];
+                    lenQ++;
+                }
             }
-        }
-
-        RestartTrailEntry entry = trail[level];
-        if (entry.nodeIndex == nodeIndex) candidateMask &= entry.childMask;
-
-        if (candidateMask == 0u)
-        {
-            releaseTransformEntry(transformStack, transformStackPtr, transformIdx);
-            done = popTraversal(trail, level, currentSlot, currentTEntry, stack, stackPtr,
-                                 packedIndexType, transformIdx, transformStack, transformStackPtr,
-                                 startRay, rootIndex, rootType, closest);
-            continue;
-        }
-
-        trail[level].nodeIndex = nodeIndex;
-        trail[level].childMask = candidateMask;
-
-        uint candSlots[KDOP_WIDTH];
-        uint candCount = 0;
-        for (uint s = 0; s < hitCount; ++s)
-        {
-            uint slot = sortedSlots[s];
-            if (candidateMask & (1u << slot))
+            // if len(Q) == 0:
+            //      exit = pop(trail, level)
+            // else:
+            //      node <- first entry in Q
+            //      remove first entry from Q
+            //      if len(Q) == 0:
+            //          trail[level] <- N
+            //      else:
+            //          mark last entry in Q as last child
+            //          PushBackToFront(Q)
+            //      level <- level + 1
+            if (lenQ == 0)
             {
-                candSlots[candCount++] = slot;
+                // exit = pop(trail, level)
             }
-        }
-
-        uint closestSlot = candSlots[0];
-
-        for (int s = (int)candCount - 1; s >= 1; --s)
-        {
-            uint slot = candSlots[s];
-            uint pushedPacked, pushedTransformIdx;
-            resolveCandidate(node, slot, tHit[slot], transformIdx,
-                              transformStack, transformStackPtr,
-                              pushedPacked, pushedTransformIdx);
-
-            if (stackPtr >= SHORT_STACK_SIZE)
+            else
             {
-                releaseTransformEntry(transformStack, transformStackPtr, stack[0].transformStackIndex);
-                for (uint m = 1; m < SHORT_STACK_SIZE; ++m)
-                    stack[m - 1] = stack[m];
-                stackPtr--;
+                // set currrent to the node that is the first entry in Q
+                if (lenQ == 1)
+                {
+                    // that was the only node
+                    trail[level] = LAST_CHILD;
+                }
+                else
+                {
+                    // mark last entry in Q as last child
+                    // also remember that PushBackToFront has to push Q[1:lenQ] since Q[0] has already been set to the current node (i.e. the top of the stack)
+                    //PushBackToFront(stack, stackPtr, Q, lenQ, );
+                }
+                level++;
+
             }
-
-            ShortStackNode entryNode;
-            entryNode.packedIndexType = pushedPacked;
-            entryNode.tEntry = tHit[slot];
-            entryNode.transformStackIndex = pushedTransformIdx;
-            entryNode.parentSlot = slot;
-
-            stack[stackPtr++] = entryNode;
-            transformStack[pushedTransformIdx].nodesUsingThis++;
         }
+        else if (currentType == PrimType::BVH_NODE)
+        {
+            // binary AABB BVH node, to be delt with later
+            // do not need to worry about them right now
+        }
+        else
+        {
+            // intersected a primitive
+            ProcessPrimitive(currentType, currentIndex, currentRay, closest, identity);
 
-        // resolve and descend into closest
-        uint nextPacked, nextTransformIdx;
-        resolveCandidate(node, closestSlot, tHit[closestSlot], transformIdx,
-                          transformStack, transformStackPtr,
-                         nextPacked, nextTransformIdx);
-
-        transformStack[nextTransformIdx].nodesUsingThis++;
-        releaseTransformEntry(transformStack, transformStackPtr, transformIdx);
-
-        packedIndexType = nextPacked;
-        transformIdx = nextTransformIdx;
-        currentSlot = closestSlot;
-        currentTEntry = tHit[closestSlot];
-        level++;
+            // exit = pop(trail, level)
+        }
     }
-    return closest;
 }
+

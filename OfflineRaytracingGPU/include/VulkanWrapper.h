@@ -61,7 +61,6 @@ class VK_Wrap
 
 	SDL_Window* window = nullptr;
 	uint32_t deviceCount{ 0 };
-	uint32_t deviceIndex{ 0 };
 	std::vector<VkPhysicalDevice> devices;
 
 	VkSurfaceCapabilitiesKHR surfaceCaps{};
@@ -163,7 +162,7 @@ public:
 	CameraWrapper camera;
 	ShaderData shaderData{};
 
-
+	uint32_t deviceIndex{ 0 };
 
 
 	VK_Wrap() {};
@@ -383,10 +382,28 @@ public:
 		std::cout << "Found " << deviceCount << " Devices\n";
 		devices.resize(deviceCount);
 		chk(vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()));
+		std::cout << "Available devices:\n";
+		for (int i = 0; i < deviceCount ; i++)
+		{
+			const auto& device = devices[i];
+			VkPhysicalDeviceIDProperties idProps{
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES
+			};
+			VkPhysicalDeviceProperties2 tmpProperties{ 
+				.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+				.pNext = &idProps
+			};
 
+			vkGetPhysicalDeviceProperties2(device, &tmpProperties);
+			std::cout << "----------------------------------\n";
+			std::cout << "\t" << i << " : " << tmpProperties.properties.deviceName << "\n";
+			printf("\tUUID: %02X\n", idProps.deviceUUID);
+			printf("\tLUID: %02X\n", idProps.deviceLUID);
+		}
+		deviceIndex = std::min(deviceIndex, deviceCount - 1);// oops gpu you dont actually have
 		VkPhysicalDeviceProperties2 deviceProperties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 		vkGetPhysicalDeviceProperties2(devices[deviceIndex], &deviceProperties);
-		std::cout << "Selected device: " << deviceProperties.properties.deviceName << "\n";
+		std::cout << "Selected device: "  << deviceIndex << " : " << deviceProperties.properties.deviceName << "\n";
 		// Find a queue family for graphics
 		uint32_t queueFamilyCount{ 0 };
 		vkGetPhysicalDeviceQueueFamilyProperties(devices[deviceIndex], &queueFamilyCount, nullptr);
@@ -1301,6 +1318,22 @@ public:
 		}
 		else if (prim == KDOP_NODE)
 		{
+			const auto& c = kdopHotNodes[transform.childIndex];
+			glm::vec3 aabbMin(FLT_MAX);
+			glm::vec3 aabbMax( -FLT_MAX);
+
+			for (int i = 0; i < KDOP_WIDTH; i++)
+			{
+				PrimType t = unpackType(std::bit_cast<unsigned int>(c.min_packed[i].w));
+				if (t == EMPTY) continue;
+				aabbMin = make_aabb_min(aabbMin, c.min_packed[i]);
+				aabbMax = make_aabb_max(aabbMax, c.max[i]);
+			}
+
+			min = make_aabb_min(min, aabbMin);
+			max = make_aabb_max(max, aabbMax);
+
+			/*
 			const auto& c = kdopNodes[transform.childIndex];
 			PrimType left = unpackType(c.packedIndexType_left);
 			PrimType right = unpackType(c.packedIndexType_right);
@@ -1318,6 +1351,7 @@ public:
 				min = make_aabb_min(min, aabbMin);
 				max = make_aabb_max(max, aabbMax);
 			}
+			*/
 		}
 		else 
 		{
@@ -2080,7 +2114,7 @@ public:
 			S[1][1] = scale.y * scale_mod;
 			S[2][2] = scale.z * scale_mod;
 
-			float eps = 0.4;
+			float eps = 0.05;
 			float k = std::sqrt(-2.0 * std::log(eps)); // radius of ellipsoid in "S" units
 			//std::cout << "Alpha: " << alpha << "\n";
 			// ellipsoid semi-axes in world space = k * s_x, k * s_y, k * s_z along R's columns

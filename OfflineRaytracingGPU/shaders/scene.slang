@@ -23,7 +23,7 @@ public float4 ray_color(int rayIndex, uint bvhRoot, PrimType rootType, float3 ca
     float4 radianceSample = throughputScatter * throughputEmission;
 
     // TODO maybe: let the user pick different traversal algorithms?
-    Intersection intersection = intersect_scene_bvh(rayIndex, bvhRoot, rootType);
+    Intersection intersection = intersect_scene_wide_dfs(rayIndex, bvhRoot, rootType);
     if (!valid_intersection(intersection))
     {
         return throughputScatter * (throughputEmission + sky_color(ray, backgroundColor));

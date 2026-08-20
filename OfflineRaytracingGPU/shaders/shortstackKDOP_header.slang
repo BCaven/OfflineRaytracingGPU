@@ -2,6 +2,8 @@ implementing scene;
 
 // short stack structs
 
+public static const uint LAST_CHILD = 0xFFFFFFFFu;
+
 struct RestartTrailEntry
 {
     uint nodeIndex;
@@ -14,4 +16,5 @@ struct ShortStackNode
     float tEntry;
     uint transformStackIndex;
     uint parentSlot;
+    uint parentLevel;
 }

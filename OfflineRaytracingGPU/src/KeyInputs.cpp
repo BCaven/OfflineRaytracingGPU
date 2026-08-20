@@ -22,7 +22,7 @@ void KeyInputs::handleKeyInputs()
 	UP = keyboardState[SDL_SCANCODE_E];
 	DOWN = keyboardState[SDL_SCANCODE_Q];
 
-	QUIT = keyboardState[SDL_SCANCODE_ESCAPE];
+	QUIT = (QUIT || keyboardState[SDL_SCANCODE_ESCAPE]);
 
 	SDL_Event e;
 	while (SDL_PollEvent(&e) != 0)

@@ -72,7 +72,7 @@ int main()
 	//int readingroomIndex = wrapper.loadSplat("assets/readingroom_20x_180.ply");
 
 	int tomatoIndex = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
-
+	/*
 	for (int i = tomatoIndex; i > tomatoIndex - 8; i--)
 	{
 		const auto& t = wrapper.kdopNodes[i];
@@ -82,6 +82,7 @@ int main()
 			"\naabb right min: " << t.kDop_right.min[0] << ", " << t.kDop_right.min[1] << ", " << t.kDop_right.min[2] <<
 			"\naabb right max: " << t.kDop_right.max[0] << ", " << t.kDop_right.max[1] << ", " << t.kDop_right.max[2] << "\n";
 	}
+	*/
 	//std::cout << "Tomato BVH (root node: " << tomatoIndex << ")\n";
 	//wrapper.printBVH(tomatoIndex, 2);
 	//wrapper.validateBVH(tomatoIndex);
@@ -104,11 +105,11 @@ int main()
 	}
 
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, readingroomIndex);	
-	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::KDOP_NODE, tomatoIndex);
+	wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::KDOP_NODE, tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 	int wideTomatoIndex = wrapper.flattenKDop(tomatoIndex);
-
+	/*
 	for (int i = (int)wrapper.kdopHotNodes.size() - 1; i > (int)wrapper.kdopHotNodes.size() - 8; i--)
 	{
 		std::cout << "kdot hot node index: " << i << "\n";
@@ -138,7 +139,7 @@ int main()
 	}
 
 	std::cout << "Number of splats: " << wrapper.splats.size() << "\n";
-
+	*/
 	wrapper.camera = CameraWrapper{
 		.origin = glm::vec3(0, 0.75, 1),
 		.fov = 20
@@ -147,22 +148,22 @@ int main()
 	wrapper.shaderData.backgroundColor = sky;
 
 	int root = wrapper.loadBVH();
-	std::cout << "TLAS BVH (root node: " << root << ")\n";
+	//std::cout << "TLAS BVH (root node: " << root << ")\n";
 
 	//wrapper.printBVH(root, 3);
 
 	wrapper.init();
-
 	wrapper.shaderData.bvhRoot = root;
 	wrapper.shaderData.rootType = PrimType::BVH_NODE;
 	bool running = true;
 	while (running)
 	{
+		
 		if (wrapper.draw())
 		{
 			running = false;
 		}
-
+		
 	}
 
 	return 0;

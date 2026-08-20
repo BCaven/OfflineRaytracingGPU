@@ -157,30 +157,11 @@ void processChild(
     }
 }
 
-
-
-Intersection intersect_scene_bvh(int rayIndex, uint rootIndex, PrimType rootType)
+Intersection intersect_scene_wide_dfs(int rayIndex, uint rootIndex, PrimType rootType)
 {
-    // TODO: try this using a Rope / threaded BVH later
-    /*
-    push root
-    closest.t = FLT_MAX
-    while stack not empty:
-        if TRANSFORM:
-            push transformed TraversalNode
-        if BVH_NODE:
-            check children
-            potentially push children
-    return closest
-    */
-    int iterations = 0;
     Ray startRay = rays[rayIndex];
-    TraversalNode root; // = TraversalNode(rootIndex, startRay.origin, startRay.direction, 1.f, 0.f);
-    root.packedIndexType = packChild(rootType, rootIndex);
-    root.transformStackIndex = 0;
-    root.tEntry = 0.f;
-    TraversalNode stack[STACK_SIZE];
-    TransformStackNode transformStack[TRANSFORM_STACK_SIZE];
+    Intersection closest = no_intersection();
+    closest.t = FLT_MAX;
 
     TransformStackNode identityTransform;
     identityTransform.tScale = 1.f;
@@ -188,49 +169,83 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex, PrimType rootType
     identityTransform.rayOrigin = startRay.origin;
     identityTransform.transformDepth = 0;
     identityTransform.nodesUsingThis = 1;
-
-    uint stackPtr = 0;
-    uint transformStackPtr = 0;
-
+    TransformStackNode transformStack[TRANSFORM_STACK_SIZE];
+    int transformStackPtr = 0;
     transformStack[transformStackPtr++] = identityTransform;
+
+    TraversalNode root;
+    root.packedIndexType = packChild(rootType, rootIndex);
+    root.tEntry = 0;
+    root.transformStackIndex = 0;
+    TraversalNode stack[STACK_SIZE];
+    int stackPtr = 0;
+
     stack[stackPtr++] = root;
 
-    Intersection closest = no_intersection();
-    closest.t = FLT_MAX;
+    uint traversals = 0;
 
-    while (stackPtr > 0 && iterations < MAX_TRAVERSALS)
+    while (stackPtr > 0 && traversals < MAX_TRAVERSALS)
     {
-        iterations++;
-        TraversalNode node = stack[--stackPtr];
-        TransformStackNode transformNode = transformStack[node.transformStackIndex];
-
-        float tEntry = node.tEntry;
-
+        TraversalNode current = stack[--stackPtr];
+        // early release if there is already a closer node
+        float tEntry = current.tEntry;
         if (tEntry >= closest.t)
         {
-            releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
+            releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
             continue;
         }
+
+        uint nodeIndex = unpackIndex(current.packedIndexType);
+        PrimType currentType = unpackType(current.packedIndexType);
+
+        TransformStackNode transformNode = transformStack[current.transformStackIndex];
 
         Ray intersectionRay;
         intersectionRay.direction = transformNode.rayDirection;
         intersectionRay.origin = transformNode.rayOrigin;
-        uint nodeIndex = unpackIndex(node.packedIndexType);
-        PrimType nodeType = unpackType(node.packedIndexType);
 
-        if (nodeType == PrimType::BVH_NODE)
+        if (currentType == PrimType::KDOP_NODE)
+        {
+            KDopNodeHot hot = kdopHotNodes[nodeIndex];
+            float tHit[KDOP_WIDTH];
+            uint validMask = intersectKDopChildren(nodeIndex, hot, intersectionRay.origin, intersectionRay.direction, closest.t, 1., tHit);
+
+            if (validMask == 0u) continue;
+
+            uint sortedSlots[KDOP_WIDTH];
+            uint count = sortChildrenByDistance(validMask, tHit, sortedSlots);
+
+            for (int i = (int)count - 1; i >= 0; --i)
+            {
+                uint slot = sortedSlots[i];
+                uint index = unpackIndex(bit_cast<uint>(hot.min_packed[slot].w));
+                PrimType type = unpackType(bit_cast<uint>(hot.min_packed[slot].w));
+
+                processChild(
+                    stack, 
+                    stackPtr, 
+                    transformStack, 
+                    transformStackPtr, 
+                    current, 
+                    closest, 
+                    index, 
+                    type,
+                             tHit[slot]);
+            }
+        }
+        if (currentType == PrimType::BVH_NODE)
         {
             float leftT = FLT_MAX;
             float rightT = FLT_MAX;
-            const bvhPacked current = bvhNodes[nodeIndex];
-            float3 leftMin = current.leftMin_leftPacked.xyz;
-            float3 leftMax = current.leftMax_rightPacked.xyz;
-            float3 rightMin = current.rightMin_reserved0.xyz;
-            float3 rightMax = current.rightMax_reserved1.xyz;
-            uint leftIndex = unpackIndex(bit_cast<uint>(current.leftMin_leftPacked.w));
-            PrimType leftType = unpackType(bit_cast<uint>(current.leftMin_leftPacked.w));
-            uint rightIndex = unpackIndex(bit_cast<uint>(current.leftMax_rightPacked.w));
-            PrimType rightType = unpackType(bit_cast<uint>(current.leftMax_rightPacked.w));
+            const bvhPacked currentBVHNode = bvhNodes[nodeIndex];
+            float3 leftMin = currentBVHNode.leftMin_leftPacked.xyz;
+            float3 leftMax = currentBVHNode.leftMax_rightPacked.xyz;
+            float3 rightMin = currentBVHNode.rightMin_reserved0.xyz;
+            float3 rightMax = currentBVHNode.rightMax_reserved1.xyz;
+            uint leftIndex = unpackIndex(bit_cast<uint>(currentBVHNode.leftMin_leftPacked.w));
+            PrimType leftType = unpackType(bit_cast<uint>(currentBVHNode.leftMin_leftPacked.w));
+            uint rightIndex = unpackIndex(bit_cast<uint>(currentBVHNode.leftMax_rightPacked.w));
+            PrimType rightType = unpackType(bit_cast<uint>(currentBVHNode.leftMax_rightPacked.w));
             if (leftType != PrimType::EMPTY)
             {
                 leftT = transformNode.tScale * intersect_aabb(intersectionRay, leftMin, leftMax);
@@ -245,113 +260,33 @@ Intersection intersect_scene_bvh(int rayIndex, uint rootIndex, PrimType rootType
                 // push far child first
                 if (rightT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, rightIndex, rightType, rightT);
                 }
                 if (leftT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, leftIndex, leftType, leftT);
                 }
             }
             else
             {
                 if (leftT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, leftIndex, leftType, leftT);
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, leftIndex, leftType, leftT);
                 }
                 if (rightT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, rightIndex, rightType, rightT);
+                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, rightIndex, rightType, rightT);
                 }
             }
-        }
-        else if (nodeType == PrimType::KDOP_NODE)
-        {
-            const KDopNodeHot hot = kdopHotNodes[nodeIndex];
-
-            uint packed[KDOP_WIDTH];
-            float childTNear[KDOP_WIDTH];
-            float childTFar[KDOP_WIDTH];
-            bool validChildren[KDOP_WIDTH];
-            bool anyCandidates = false;
-            [unroll]
-            for (int i = 0; i < KDOP_WIDTH; ++i)
-            {
-                packed[i] = bit_cast<uint>(hot.min_packed[i].w);
-                childTNear[i] = FLT_MAX;
-                childTFar[i] = -FLT_MAX;
-                validChildren[i] = false;
-            }
-
-            // check aabb before requesting full node
-            [unroll]
-            for (int i = 0; i < KDOP_WIDTH; ++i)
-            {
-                if (unpackType(packed[i]) == PrimType::EMPTY) continue;
-
-                float2 aabbLocal = aabb_bounds(intersectionRay, hot.min_packed[i].xyz, hot.max[i].xyz);
-
-                float worldT = transformNode.tScale * aabbLocal.x;
-
-                if (worldT >= closest.t) continue;
-
-                childTNear[i] = aabbLocal.x;
-                childTFar[i] = aabbLocal.y;
-
-                validChildren[i] = true;
-
-                anyCandidates = true;
-            }
-
-            if (anyCandidates)
-            {
-                const K14DopNodeCold cold = kdopColdNodes[nodeIndex];
-
-                [unroll]
-                for (int i = 0; i < KDOP_WIDTH; ++i)
-                {
-
-
-                    if (childTNear[i] == FLT_MAX) continue;
-
-                    if (validChildren[i] == false) continue; // node is already invalid from AABB
-
-                    float2 kdopLocal_i = kdop_bounds_diag(intersectionRay,
-                        cold.min[i], cold.max[i], childTNear[i], childTFar[i]);
-
-                    //childTNear[i] = kdopLocal_i.x;
-                    //childTFar[i] = kdopLocal_i.y;
-
-                    float worldNear_i2 = transformNode.tScale * kdopLocal_i.x;
-
-                    if (worldNear_i2 > closest.t)
-                    {
-                       // validChildren[i] = false;
-                    }
-
-                }
-
-                // push everyone who is still valid
-                [unroll]
-                for (int i = 0; i < KDOP_WIDTH; ++i)
-                {
-                    if (validChildren[i] == false) continue;
-
-                    uint stackIndex = unpackIndex(packed[i]);
-                    PrimType type = unpackType(packed[i]);
-                    float worldNear_i = transformNode.tScale * childTNear[i];
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, node, closest, stackIndex, type, worldNear_i);
-                }
-             }
         }
         else
         {
-            // dead node somehow?
-            // I don't think this code is possible in a procedural stack with procedural nodes
-            releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
+            // dead node
+            releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
             continue;
         }
-        
-        releaseTransformEntry(transformStack, transformStackPtr, node.transformStackIndex);
+        releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
     }
+
     return closest;
 }
