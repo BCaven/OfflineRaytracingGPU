@@ -1353,6 +1353,22 @@ public:
 			}
 			*/
 		}
+		else if (prim == SPHERE)
+		{
+			const auto& s = spheres[transform.childIndex];
+			min = make_aabb_min(min, s.center - s.radius);
+			max = make_aabb_max(min, s.center + s.radius);
+		}
+		else if (prim == TRIANGLE)
+		{
+			throw std::runtime_error("Not a supported type: " + transform.childPrim);
+
+		}
+		else if (prim == GAUSSIAN_SPLAT)
+		{
+			throw std::runtime_error("Not a supported type: " + transform.childPrim);
+
+		}
 		else 
 		{
 			throw std::runtime_error("Not a supported type: " + transform.childPrim);
@@ -1557,7 +1573,7 @@ public:
 		}
 	}
 
-	int loadBVH()
+	PackedRef loadBVH()
 	{
 		// build TLAS bvh
 		
@@ -1567,12 +1583,14 @@ public:
 		
 
 		std::vector<LeafItem> leaves;
+		/*
 		for (size_t i = 0; i < spheres.size(); ++i)
 		{
 			const auto& s = spheres[i];
 			leaves.push_back({ s.center - s.radius, s.center + s.radius,
 								s.center, PrimType::SPHERE, (int)i });
 		}
+		*/
 		for (size_t i = 0; i < transforms.size(); ++i)
 		{
 			glm::vec3 min, max;
@@ -1583,15 +1601,10 @@ public:
 		glm::vec3 rootMin, rootMax;
 		int root = buildSAH(leaves, 0, (int)leaves.size(), rootMin, rootMax);
 
-		/*
-		for (const auto& node : bvhNodes)
-		{
-			std::cout << "BVH Node: " << node.mortonCode << "\nLeft: " << node.left.index << " type: " << node.left.type <<
-				"\nRight: " << node.right.index << " type: " << node.right.type << "\n";
-		}
-		*/
-		return root;
+		return packChild(BVH_NODE, root);
 	}
+
+
 
 	int build14DOP(std::vector<KDopLeaf>& leaves, int start, int end, K14Dop& outKDop)
 	{
@@ -1827,16 +1840,11 @@ public:
 		return buildSAH(leaves, 0, leaves.size(), childMin, childMax);
 	}
 	
-	int loadTransform(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale, PrimType childPrim, int childIndex)
+	PackedRef loadTransform(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale, PackedRef childRef)
 	{
-		assert(childPrim == BVH_NODE || KDOP_NODE);
-		int index = childIndex;
-		if (childPrim == KDOP_NODE)
-		{
-			// flatten into wide kdop before transforming
-			index = flattenKDop(childIndex);
-			validateWideKDop(index);
-		}
+		PrimType childPrim = unpackType(childRef);
+		int childIndex = unpackIndex(childRef);
+		//assert(childPrim == BVH_NODE || KDOP_NODE);
 
 		constexpr float MIN_SCALE = 1e-8f;
 
@@ -1858,13 +1866,13 @@ public:
 			.matrix = transformMatrix,
 			.invMatrix = glm::inverse(transformMatrix),
 			.childPrim = childPrim,
-			.childIndex = index
+			.childIndex = childIndex
 		};
 		transforms.push_back(transform);
-		return transforms.size() - 1;
+		return packChild(childPrim, transforms.size() - 1);
 	}
 
-	int loadObj(std::string filepath, unsigned int materialIndex)
+	PackedRef loadObj(std::string filepath, unsigned int materialIndex)
 	{
 		// load mesh and build its BLAS bvh
 		// the only way for this to be in the scene is to make it the child of a transform node
@@ -1889,8 +1897,11 @@ public:
 		{
 			throw std::runtime_error( "When loading " + filepath + " number of vertices was not a multiple of 3!");
 		}
+
 		std::cout << "Loading " << filepath << " with " << (int)vertices.size() / 3 << " triangles\n";
-		std::vector<LeafItem> leaves;
+		std::vector<KDopLeaf> leavesKdop;
+		std::vector<LeafItem> leavesAABB;
+		bool useKdop = vertices.size() > (3 * 16);
 		for (size_t i = 0; i < vertices.size(); i += 3)
 		{
 			glm::vec3 v0 = vertices[i].pos;
@@ -1906,27 +1917,54 @@ public:
 
 			max += 0.001f;
 			min -= 0.001f;
-			leaves.push_back(LeafItem{
-				.min = min,
-				.max = max,
-				.center = (min + max) * 0.5f,
-				.type = PrimType::TRIANGLE,
-				.index = (int) triangles.size()
-				});
-			triangles.push_back(
-				Triangle{
+			Triangle t = Triangle{
 					.v0 = v0, .v1 = v1, .v2 = v2,
 					.normal = normal,
 					.d = -1 * dot(normal, v0),
 					.materialIndex = materialIndex
-				}
-			);
+			};
+			if (useKdop)
+			{
+				K14Dop kdop = kdopFromTriangle(t);
+				leavesKdop.push_back(KDopLeaf{
+					.type = PrimType::TRIANGLE,
+					.index = (int)triangles.size(),
+					.center = (min + max) * 0.5f,
+					.kDop = kdop
+				});
+			}
+			else
+			{
+				leavesAABB.push_back(LeafItem{
+					.min = min,
+					.max = max,
+					.center = (min + max) * 0.5f,
+					.type = PrimType::TRIANGLE,
+					.index = (int)triangles.size()
+				});
+			}
+			
+			triangles.push_back(t);			
 		}
-
-		return buildChildBVH(leaves);
+		int index = 0;
+		PrimType t = EMPTY;
+		if (useKdop)
+		{
+			K14Dop outDop;
+			int binaryKdop = build14DOP(leavesKdop, 0, leavesKdop.size() - 1, outDop);
+			index = flattenKDop(binaryKdop);
+			t = KDOP_NODE;
+		}
+		else
+		{
+			index = buildChildBVH(leavesAABB);
+			t = BVH_NODE;
+		}
+		
+		return packChild(t, index);
 	}
 
-	int loadSplat(std::string filepath)
+	PackedRef loadSplat(std::string filepath)
 	{
 		std::cout << "Loading " << filepath << "\n";
 		// same as obj loader in terms of BLAS and TLAS
@@ -2184,11 +2222,18 @@ public:
 		}
 
 		K14Dop outDop;
-		return build14DOP(leaves, 0, leaves.size() - 1, outDop);
+		int binaryKdop = build14DOP(leaves, 0, leaves.size() - 1, outDop);
+		return packChild(KDOP_NODE, flattenKDop(binaryKdop));
 	}
 
-	void validateBVHNode(int index,	std::unordered_set<int>& visiting, std::unordered_set<int>& visited)
+	void validateBVHNode(PackedRef childRef, std::unordered_set<int>& visiting, std::unordered_set<int>& visited)
 	{
+		if (unpackType(childRef) != BVH_NODE)
+		{
+			std::cerr << "Tried to validate something that was not a bvh node\n";
+			return;
+		}
+		int index = unpackIndex(childRef);
 		if (index < 0 || index >= static_cast<int>(bvhNodes.size()))
 		{
 			throw std::runtime_error(
@@ -2215,7 +2260,7 @@ public:
 				if (child.type == PrimType::BVH_NODE)
 				{
 					validateBVHNode(
-						child.index,
+						packChild(BVH_NODE, child.index),
 						visiting,
 						visited);
 				}
@@ -2224,7 +2269,7 @@ public:
 					int tIndex = transforms[child.index].childIndex;
 					assert(transforms[child.index].childPrim == PrimType::BVH_NODE);
 					validateBVHNode(
-						tIndex,
+						packChild(BVH_NODE, tIndex),
 						visiting,
 						visited
 					);
@@ -2247,8 +2292,15 @@ public:
 		visited.insert(index);
 	}
 
-	void validateBVH(int root, int depth_to_display)
+	void validateBVH(PackedRef rootRef, int depth_to_display)
 	{
+		if (unpackType(rootRef) != BVH_NODE)
+		{
+			std::cerr << "Tried to validate something that was not a bvh node\n";
+			return;
+			
+		}
+		int root = unpackIndex(rootRef);
 		std::unordered_set<int> visiting;
 		std::unordered_set<int> visited;
 

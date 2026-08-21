@@ -129,7 +129,6 @@ void processChild(
     }
     else if (childType == PrimType::TRANSFORM)
     {
-        // Assume TRANSFORMs can *only* hold BVH_NODE
         Transform t = transforms[childIndex];
         TransformStackNode transformStackNode = transformStack[node.transformStackIndex];
         TraversalNode resolved;
@@ -230,7 +229,7 @@ Intersection intersect_scene_wide_dfs(int rayIndex, uint rootIndex, PrimType roo
                     closest, 
                     index, 
                     type,
-                             tHit[slot]);
+                    tHit[slot]);
             }
         }
         if (currentType == PrimType::BVH_NODE)
@@ -281,9 +280,8 @@ Intersection intersect_scene_wide_dfs(int rayIndex, uint rootIndex, PrimType roo
         }
         else
         {
-            // dead node
-            releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
-            continue;
+            // primitive or a transform -> transform chain
+            processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, nodeIndex, currentType, closest.t);
         }
         releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
     }

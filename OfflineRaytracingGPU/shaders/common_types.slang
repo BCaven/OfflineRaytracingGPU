@@ -8,7 +8,7 @@ public static const float4 GLASS_F0 = float4(0.04);
 public static const int KDOP_WIDTH = 8;
 
 static const uint STACK_SIZE = 64;
-static const uint TRANSFORM_STACK_SIZE = 24;
+static const uint TRANSFORM_STACK_SIZE = 32;
 
 static const uint SHORT_STACK_SIZE = 15;
 static const uint RESTART_TRAIL_SIZE = 512; // this should be the max depth of the bvh
@@ -26,17 +26,17 @@ public static const float SH_C2[] = {
     1.0925484305920792f,
     -1.0925484305920792f,
     0.31539156525252005f,
-                                      -1.0925484305920792f,
+    -1.0925484305920792f,
     0.5462742152960396f
 };
 public static const float SH_C3[] = {
     -0.5900435899266435f,
     2.890611442640554f,
     -0.4570457994644658f,
-                                      0.3731763325901154f,
+    0.3731763325901154f,
     -0.4570457994644658f,
     1.445305721320277f,
-                                      -0.5900435899266435f
+    -0.5900435899266435f
 };
 
 // RNG

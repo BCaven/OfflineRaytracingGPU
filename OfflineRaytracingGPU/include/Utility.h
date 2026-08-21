@@ -56,6 +56,8 @@ struct Ray
 	glm::vec4 emission;
 };
 
+using PackedRef = unsigned int;
+
 // TODO: later this will be removed since the BVH will exclusively be on the GPU
 enum PrimType : unsigned int
 {
@@ -401,7 +403,7 @@ static inline float kdopSAHCost(const K14Dop& kdop)
 static inline K14Dop kdopFromGaussianSplat(const glm::vec3& center, const glm::mat3& rotation, const glm::vec3& scale, float kSigma)
 {
 	K14Dop dop;
-	for (int i = 0; i < 7; ++i)
+	for (int i = 0; i < KDOP_AXIS_COUNT; ++i)
 	{
 		const glm::vec3& n = KDOP_DIRECTIONS[i];
 		glm::vec3 localN = glm::transpose(rotation) * n;
@@ -413,7 +415,24 @@ static inline K14Dop kdopFromGaussianSplat(const glm::vec3& center, const glm::m
 	return dop;
 }
 
-static inline unsigned int packChild(PrimType type, int index)
+static inline K14Dop kdopFromTriangle(const Triangle& t)
+{
+	K14Dop dop;
+	for (int i = 0; i < KDOP_AXIS_COUNT; ++i)
+	{
+		const glm::vec3& n = KDOP_DIRECTIONS[i];
+		float p0 = glm::dot(n, t.v0);
+		float p1 = glm::dot(n, t.v1);
+		float p2 = glm::dot(n, t.v2);
+		float minDop = std::min(p0, std::min(p1, p2));
+		float maxDop = std::max(p0, std::max(p1, p2));
+		dop.max[i] = maxDop;
+		dop.min[i] = minDop;
+	}
+	return dop;
+}
+
+static inline PackedRef packChild(PrimType type, int index)
 {
 	return (unsigned int(type) << 28) | (unsigned int(index) & 0x0FFFFFFFu);
 }
