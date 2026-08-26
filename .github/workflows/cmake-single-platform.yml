@@ -37,13 +37,11 @@ jobs:
           -Uri "https://sdk.lunarg.com/sdk/download/$version/windows/vulkan_sdk.exe" `
           -OutFile $installer
         
-        & $installer search
-        
         & $installer `
           --accept-licenses `
           --default-answer `
           --confirm-command `
-          install
+          install com.lunarg.vulkan.sdl2
 
         if ($LASTEXITCODE -ne 0) {
           exit $LASTEXITCODE
