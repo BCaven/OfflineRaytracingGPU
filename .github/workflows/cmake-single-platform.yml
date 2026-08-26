@@ -43,6 +43,12 @@ jobs:
           exit $LASTEXITCODE
         }
 
+        if (-not (Test-Path $sdkPath)) {
+          throw "Vulkan SDK was not installed at $sdkPath"
+        }
+        
+        "VULKAN_SDK=$sdkPath" >> $env:GITHUB_ENV
+
     - name: Check Vulkan SDK
       shell: pwsh
       run: |
