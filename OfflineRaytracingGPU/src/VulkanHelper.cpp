@@ -56,7 +56,7 @@ int main()
 	for (float r = 0; r < PI * 2; r+=PI / 8)
 	{
 		wrapper.spheres.push_back(
-			Sphere{  glm::vec3( offset + (std::sin(r) * radius), -1, offset + (std::cos(r) * radius)), 1, (unsigned int)rand(gen)}
+			Sphere{  glm::vec3( offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), 1, (unsigned int)rand(gen)}
 		);
 	}
 	
@@ -65,7 +65,7 @@ int main()
 	{
 		PackedRef p = packChild(PrimType::SPHERE, i);
 		float r = (rand(gen) + 1);
-		wrapper.loadTransform(glm::vec3(0, r - 1, 0), glm::vec3(0, 0, 0), glm::vec3(1, r, 1), p);
+		wrapper.loadTransform(glm::vec3(0, r - 5, 0), glm::vec3(0, 0, 0), glm::vec3(1, r, 1), p);
 	}
 
 	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 9);
@@ -98,7 +98,7 @@ int main()
 	}
 
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), readingroomIndex);	
-	wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), tomatoIndex);
+	wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(1), tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 	wrapper.camera = CameraWrapper{
