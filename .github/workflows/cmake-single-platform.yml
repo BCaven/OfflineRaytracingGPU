@@ -62,19 +62,6 @@ jobs:
         }
         
         "VULKAN_SDK=$sdkPath" >> $env:GITHUB_ENV
-
-    - name: Check Vulkan SDK
-      shell: pwsh
-      run: |
-        Write-Host "VULKAN_SDK = $env:VULKAN_SDK"
-    
-        if (-not (Test-Path $env:VULKAN_SDK)) {
-          Write-Error "VULKAN_SDK does not exist"
-          exit 1
-        }
-    
-        Write-Host "Vulkan SDK contents:"
-        Get-ChildItem $env:VULKAN_SDK
     
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
@@ -90,4 +77,15 @@ jobs:
       # Execute tests defined by the CMake configuration.
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
       run: ctest -C ${{env.BUILD_TYPE}}
+
+    - name: Find build outputs
+      shell: pwsh
+      run: |
+        Write-Host "Executables:"
+        Get-ChildItem "${{ github.workspace }}/build" -Recurse -Filter "*.exe" |
+          Select-Object FullName
+      
+        Write-Host "`nDLLs:"
+        Get-ChildItem "${{ github.workspace }}/build" -Recurse -Filter "*.dll" |
+          Select-Object FullName
 
