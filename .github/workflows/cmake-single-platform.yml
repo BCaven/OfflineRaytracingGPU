@@ -83,9 +83,5 @@ jobs:
       run: |
         $exe = "${{ github.workspace }}\build\bin\${{ env.BUILD_TYPE }}\OfflineRaytracingGPU.exe"
 
-        Write-Host "Executable:"
-        Get-Item $exe | Select-Object FullName, Length
-
-        Write-Host "`nSDK DLLs:"
-        Get-ChildItem "$env:VULKAN_SDK\Bin" -Filter "*.dll" |
-          Select-Object Name
+        Write-Host "Dependencies of $exe:"
+        dumpbin /DEPENDENTS $exe
