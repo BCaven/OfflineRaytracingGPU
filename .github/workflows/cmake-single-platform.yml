@@ -28,7 +28,11 @@ jobs:
       run: |
         $version = "${{ env.VULKAN_SDK_VERSION }}"
         $installer = "$env:RUNNER_TEMP\vulkan-sdk.exe"
+        $sdkPath = "C:\VulkanSDK\$version"
 
+        Write-Host "Vulkan SDK version: $version"
+        Write-Host "Expected SDK path: $sdkPath"
+        
         Invoke-WebRequest `
           -Uri "https://sdk.lunarg.com/sdk/download/$version/windows/vulkan_sdk.exe" `
           -OutFile $installer
