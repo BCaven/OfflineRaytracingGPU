@@ -22,7 +22,6 @@ int main()
 	std::mt19937 gen(rd());
 	std::uniform_int_distribution<> rand(0, 5);
 
-
 	VK_Wrap wrapper;
 
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;

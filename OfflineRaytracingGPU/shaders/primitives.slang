@@ -392,3 +392,126 @@ float intersect_aabb(Ray ray, float3 min, float3 max)
     return bounds.x;
 }
 
+float2 kdop_bounds_diag(Ray ray, float4 diagMin, float4 diagMax, float tNear, float tFar)
+{
+    float tEntry = tNear;
+    float tExit = tFar;
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        float denom = dot(ray.direction, KDOP_DIRECTIONS[i + 3]);
+        float o = dot(ray.origin, KDOP_DIRECTIONS[i + 3]);
+        if (abs(denom) < EPSILON)
+        {
+            if (o < diagMin[i] || o > diagMax[i])
+            {
+                return float2(FLT_MAX);
+            }
+            continue;
+        }
+        float tA = (diagMin[i] - o) / denom;
+        float tB = (diagMax[i] - o) / denom;
+        tEntry = max(tEntry, min(tA, tB));
+        tExit = min(tExit, max(tA, tB));
+        if (tEntry > tExit || tExit < EPSILON) return float2(FLT_MAX);
+    }
+
+    float tHit = max(EPSILON, tEntry);
+
+    return float2(tHit, tExit);
+}
+
+uint intersectKDopChildren(
+    uint nodeIndex,
+    KDopNodeHot hot,
+    float3 rayOrigin,
+    float3 rayDirection,
+    float tMax,
+                           float tScale,
+    out float tHit[KDOP_WIDTH])
+{
+    Ray localRay;
+    localRay.origin = rayOrigin;
+    localRay.direction = rayDirection;
+
+    // phase 1: cheap 3-axis AABB test across all slots
+    uint aabbMask = 0u;
+    float2 aabbBounds[KDOP_WIDTH];
+
+    [unroll]
+    for (uint slot = 0; slot < KDOP_WIDTH; ++slot)
+    {
+        tHit[slot] = FLT_MAX;
+
+        PrimType childType = unpackType(bit_cast<uint>(hot.min_packed[slot].w));
+        if (childType == PrimType::EMPTY)
+            continue;
+
+        float2 b = aabb_bounds(localRay, hot.min_packed[slot].xyz, hot.max[slot].xyz);
+        aabbBounds[slot] = b;
+
+        if (b.x != FLT_MAX && (tScale * b.x) < tMax)
+            aabbMask |= (1u << slot);
+    }
+
+    if (aabbMask == 0u)
+        return 0u; // nothing survived phase 1 -- skip the cold fetch entirely
+
+    // phase 2: only now pull the diagonal-plane data, and only refine
+    // the slots that actually need it
+    K14DopNodeCold cold = kdopColdNodes[nodeIndex];
+
+    uint validMask = 0u;
+
+    [unroll]
+    for (uint slot = 0; slot < KDOP_WIDTH; ++slot)
+    {
+        if ((aabbMask & (1u << slot)) == 0u)
+            continue;
+
+        float2 ab = aabbBounds[slot];
+        float2 refined = kdop_bounds_diag(localRay, cold.min[slot], cold.max[slot], ab.x, ab.y);
+
+        if (refined.x == FLT_MAX)
+            continue; // diagonal planes rejected it
+
+        float t = tScale * refined.x;
+        if (t < tMax)
+        {
+            tHit[slot] = t;
+            validMask |= (1u << slot);
+        }
+    }
+
+    return validMask;
+}
+
+uint sortChildrenByDistance(uint validMask, float tHit[KDOP_WIDTH], out uint sortedSlots[KDOP_WIDTH])
+{
+    uint count = 0;
+
+    [unroll]
+    for (uint slot = 0; slot < KDOP_WIDTH; ++slot)
+    {
+        if (validMask & (1u << slot))
+        {
+            sortedSlots[count] = slot;
+            count++;
+        }
+    }
+
+    for (uint i = 1; i < count; ++i)
+    {
+        uint key = sortedSlots[i];
+        float keyT = tHit[key];
+        int j = (int)i - 1;
+        while (j >= 0 && tHit[sortedSlots[j]] > keyT)
+        {
+            sortedSlots[j + 1] = sortedSlots[j];
+            j--;
+        }
+        sortedSlots[j + 1] = key;
+    }
+
+    return count;
+}
