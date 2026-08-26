@@ -15,3 +15,7 @@ Progressive Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 - Lights
 - Gaussian Splat primitives
 - Progressve path tracing with temporal accumulation
+- transforms (location, rotation, scale)
+- instancing
+- TLAS/BLAS separation
+- Mixed node types (transform, primitive, binary AABB, 8-wide KDOP)
