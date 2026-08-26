@@ -1,6 +1,6 @@
 # This starter workflow is for a CMake project running on a single platform. There is a different starter workflow if you need cross-platform coverage.
 # See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-multi-platform.yml
-name: CMake on a single platform
+name: Build Windows Release
 
 on:
   push:
@@ -100,14 +100,37 @@ jobs:
       run: |
         $package = "${{ github.workspace }}\package"
         $bin = "${{ github.workspace }}\build\bin\${{ env.BUILD_TYPE }}"
-    
+        $shaders = "${{ github.workspace }}\OfflineRaytracingGPU\shaders"
+
         New-Item -ItemType Directory -Force -Path $package | Out-Null
-    
-        Copy-Item "$bin\OfflineRaytracingGPU.exe" $package
-    
-        Copy-Item "$env:VULKAN_SDK\Bin\SDL3.dll" $package
-        Copy-Item "$env:VULKAN_SDK\Bin\slang.dll" $package
-    
+
+        # Executable
+        Copy-Item `
+          "$bin\OfflineRaytracingGPU.exe" `
+          "$package\"
+
+        # Shaders
+        Copy-Item `
+          $shaders `
+          "$package\" `
+          -Recurse
+
+        # Runtime DLLs
+        Copy-Item `
+          "$env:VULKAN_SDK\Bin\SDL3.dll" `
+          "$package\"
+
+        Copy-Item `
+          "$env:VULKAN_SDK\Bin\slang.dll" `
+          "$package\"
+
+        # Create ZIP
         Compress-Archive `
           -Path "$package\*" `
           -DestinationPath "${{ github.workspace }}\OfflineRaytracingGPU.zip"
+
+    - name: Upload executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: OfflineRaytracingGPU-${{ github.sha }}
+        path: ${{ github.workspace }}/OfflineRaytracingGPU.zip
