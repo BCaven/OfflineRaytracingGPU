@@ -83,5 +83,14 @@ jobs:
       run: |
         $exe = "${{ github.workspace }}\build\bin\${{ env.BUILD_TYPE }}\OfflineRaytracingGPU.exe"
 
-        Write-Host "Dependencies of ${exe}:"
-        dumpbin /DEPENDENTS "$exe"
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+        $vsPath = & $vswhere -latest -products * -property installationPath
+
+        Write-Host "Visual Studio: $vsPath"
+
+        $devCmd = Join-Path $vsPath "Common7\Tools\VsDevCmd.bat"
+
+        Write-Host "Developer command file: $devCmd"
+
+        cmd /c "`"$devCmd`" -arch=x64 && dumpbin /DEPENDENTS `"$exe`""
