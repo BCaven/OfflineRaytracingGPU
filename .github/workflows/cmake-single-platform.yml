@@ -78,14 +78,14 @@ jobs:
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
       run: ctest -C ${{env.BUILD_TYPE}}
 
-    - name: Find build outputs
+    - name: Inspect executable dependencies
       shell: pwsh
       run: |
-        Write-Host "Executables:"
-        Get-ChildItem "${{ github.workspace }}/build" -Recurse -Filter "*.exe" |
-          Select-Object FullName
-      
-        Write-Host "`nDLLs:"
-        Get-ChildItem "${{ github.workspace }}/build" -Recurse -Filter "*.dll" |
-          Select-Object FullName
+        $exe = "${{ github.workspace }}\build\bin\${{ env.BUILD_TYPE }}\OfflineRaytracingGPU.exe"
 
+        Write-Host "Executable:"
+        Get-Item $exe | Select-Object FullName, Length
+
+        Write-Host "`nSDK DLLs:"
+        Get-ChildItem "$env:VULKAN_SDK\Bin" -Filter "*.dll" |
+          Select-Object Name
