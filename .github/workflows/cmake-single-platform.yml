@@ -43,6 +43,12 @@ jobs:
           exit $LASTEXITCODE
         }
 
+        Write-Host "Environment after installation:"
+        Get-ChildItem Env: | Where-Object { $_.Name -like "*VULKAN*" }
+
+        Write-Host "C:\VulkanSDK:"
+        Get-ChildItem "C:\VulkanSDK" -ErrorAction SilentlyContinue
+
         if (-not (Test-Path $sdkPath)) {
           throw "Vulkan SDK was not installed at $sdkPath"
         }
