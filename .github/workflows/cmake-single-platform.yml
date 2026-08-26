@@ -41,7 +41,11 @@ jobs:
           --accept-licenses `
           --default-answer `
           --confirm-command `
-          install com.lunarg.vulkan.sdl2
+          install `
+          com.lunarg.vulkan.volk `
+          com.lunarg.vulkan.vma `
+          com.lunarg.vulkan.sdl2 `
+          com.lunarg.vulkan.glm
 
         if ($LASTEXITCODE -ne 0) {
           exit $LASTEXITCODE
