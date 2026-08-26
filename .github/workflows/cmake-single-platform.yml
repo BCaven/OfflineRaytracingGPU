@@ -36,7 +36,9 @@ jobs:
         Invoke-WebRequest `
           -Uri "https://sdk.lunarg.com/sdk/download/$version/windows/vulkan_sdk.exe" `
           -OutFile $installer
-
+        
+        & $installer search
+        
         & $installer `
           --accept-licenses `
           --default-answer `
