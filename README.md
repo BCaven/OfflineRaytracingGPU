@@ -1,4 +1,4 @@
-# VulkanHelper
+# Offline GPU Path Tracer
 
 Progressive Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 ![transforms](ProjectAssets/transformed_spheres.png)
