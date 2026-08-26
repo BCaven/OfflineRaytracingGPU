@@ -47,7 +47,14 @@ jobs:
       shell: pwsh
       run: |
         Write-Host "VULKAN_SDK = $env:VULKAN_SDK"
-        vulkaninfo --summary
+    
+        if (-not (Test-Path $env:VULKAN_SDK)) {
+          Write-Error "VULKAN_SDK does not exist"
+          exit 1
+        }
+    
+        Write-Host "Vulkan SDK contents:"
+        Get-ChildItem $env:VULKAN_SDK
     
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
