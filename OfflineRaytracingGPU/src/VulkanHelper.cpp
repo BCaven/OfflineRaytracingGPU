@@ -275,7 +275,21 @@ int main(int argc, char* argv[])
 
 	if (argc < 2)
 	{
-		root = suzannes_cube_instancesNxNxN(wrapper, 1000);
+		int n = 1000;
+		auto suzanne_cube8b = suzannes_cube_instancesNxNxN(wrapper, n);
+		std::cout << "loaded cube of " << std::pow(2 * n, 3) << " instances\n";
+		int numCubes = 1;
+		float step = 1; // n * 2. * 3. * 100;
+		std::vector<PackedRef> cubeCollection;
+		for (int i = -numCubes; i < 0; i++) for (int j = -numCubes; j < 0; j++) for (int k = -numCubes; k < 0; k++)
+		{
+			
+			cubeCollection.push_back(
+				wrapper.loadTransform(
+					glm::vec3(i * step, j * step, k * step), glm::vec3(0, 0, 0), glm::vec3(-1 * i), suzanne_cube8b));
+		}
+		root = wrapper.loadCollection(cubeCollection);
+		std::cout << "loaded cube of cubes\n";
 	}
 	else
 	{

@@ -39,7 +39,7 @@ The following will use these definitions: \
 Primitive: a single triangle, sphere, gaussian splat, etc. \
 Instance: a collection of primitives contained in a BLAS. \
 Collection: group of instances in an acceleration structure. \
-Note: collections can contain other collections. This node structure means the following tree is possible: \
+Note: collections can contain other collections. This node structure means the following tree is possible:
 
 ```
 root TLAS
@@ -77,4 +77,4 @@ This is an incomplete list of references used when making this project.
 Sun, Xin, et al. "Stochastic Ray Tracing of Transparent 3D Gaussians." arXiv preprint arXiv:2504.06598 (2025). \
 Feldman, Benjamin. (May 2026). “3D Gaussian Splatting in a Weekend”. bfeldman.me. https://bfeldman.me/3dgs-weekend/. \
 Arman Uguray. "Ray Tracing: GPU Edition". https://raytracing.github.io/gpu-tracing/book/RayTracingGPUEdition.html. \
-Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with a short stack." Proceedings of the Conference on High-Performance Graphics. 2019. \
+Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with a short stack." Proceedings of the Conference on High-Performance Graphics. 2019.
