@@ -2,51 +2,6 @@ implementing scene;
 
 __include bvh_header;
 
-void ProcessPrimitive(
-    PrimType type,
-    int index,
-    Ray ray,
-    inout Intersection closest,
-    TransformStackNode transformNode)
-{
-    Intersection hit = no_intersection();
-
-    // this check should be unnecessary
-    if (index < 0)
-    {
-        return;
-    }
-    switch (type)
-    {
-    case PrimType::SPHERE:
-        hit = intersect_sphere(ray, spheres[index]);
-        break;
-    case PrimType::TRIANGLE:
-        hit = intersect_triangle(ray, triangles[index]);
-        break;
-    case PrimType::GAUSSIAN_SPLAT:
-        hit = intersect_splat(ray, splats[index], closest.t / transformNode.tScale);
-        break;
-    default:
-        return;
-    }
-    if (hit.t > 0 && hit.t * transformNode.tScale < closest.t)
-    {
-        // TODO: rebuild the normal transformation matrix
-        float3x3 normalMatrix = identity3x3();
-
-        for (uint i = 0; i < transformNode.transformDepth; i++)
-        {
-            float3x3 transformNormal = transpose((float3x3)transforms[transformNode.transformChain[i]].invMatrix);
-            normalMatrix = mul(normalMatrix, transformNormal);
-        }
-
-        float3 newNormal = normalize(mul(normalMatrix, hit.normal));
-        hit.normal = newNormal;
-        hit.t *= transformNode.tScale;
-        closest = hit;
-    }
-}
 
 void push_stack(inout TraversalNode stack[STACK_SIZE],
                 inout uint stackPtr,
@@ -209,7 +164,11 @@ Intersection intersect_scene_wide_dfs(int rayIndex, uint rootIndex, PrimType roo
             float tHit[KDOP_WIDTH];
             uint validMask = intersectKDopChildren(nodeIndex, hot, intersectionRay.origin, intersectionRay.direction, closest.t, 1., tHit);
 
-            if (validMask == 0u) continue;
+            if (validMask == 0u)
+            {
+                releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
+                continue;
+            }
 
             uint sortedSlots[KDOP_WIDTH];
             uint count = sortChildrenByDistance(validMask, tHit, sortedSlots);
@@ -232,7 +191,7 @@ Intersection intersect_scene_wide_dfs(int rayIndex, uint rootIndex, PrimType roo
                     tHit[slot]);
             }
         }
-        if (currentType == PrimType::BVH_NODE)
+        else if (currentType == PrimType::BVH_NODE)
         {
             float leftT = FLT_MAX;
             float rightT = FLT_MAX;

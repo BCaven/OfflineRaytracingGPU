@@ -14,6 +14,7 @@ static_assert(SH_FLOAT_COUNT % 4 == 0,
 
 constexpr int KDOP_AXIS_COUNT = 7;
 constexpr int KDOP_WIDTH = 8;
+constexpr float KDOP_EPSILON = 0.01;
 constexpr float invSqrt2 = 0.707106781187;
 constexpr float invSqrt3 = 0.57735026919;
 static constexpr glm::vec3 KDOP_DIRECTIONS[7] =
@@ -187,8 +188,7 @@ struct ShaderData
 	int frameCount = 0;
 	glm::vec4 backgroundColor = glm::vec4(0.3, 0.5, 1.0, 1.0);
 	Camera camera;
-	unsigned int bvhRoot;
-	unsigned int rootType;
+	PackedRef sceneRoot;
 	unsigned int resetRays;
 	glm::vec3 camDir;
 	int bounceCount;
@@ -426,11 +426,53 @@ static inline K14Dop kdopFromTriangle(const Triangle& t)
 		float p2 = glm::dot(n, t.v2);
 		float minDop = std::min(p0, std::min(p1, p2));
 		float maxDop = std::max(p0, std::max(p1, p2));
-		dop.max[i] = maxDop;
-		dop.min[i] = minDop;
+		dop.max[i] = maxDop + KDOP_EPSILON;
+		dop.min[i] = minDop - KDOP_EPSILON;
 	}
 	return dop;
 }
+
+static inline K14Dop kdopFromAABB(
+	const glm::vec3& min,
+	const glm::vec3& max)
+{
+	K14Dop dop;
+
+	for (int i = 0; i < KDOP_AXIS_COUNT; ++i)
+	{
+		const glm::vec3& n = KDOP_DIRECTIONS[i];
+
+		glm::vec3 center = (min + max) * 0.5f;
+		glm::vec3 extent = (max - min) * 0.5f;
+
+		float centerProj = glm::dot(n, center);
+
+		// Assuming KDOP_DIRECTIONS are unit vectors.
+		float radius =
+			std::abs(n.x) * extent.x +
+			std::abs(n.y) * extent.y +
+			std::abs(n.z) * extent.z;
+
+		dop.min[i] = centerProj - radius;
+		dop.max[i] = centerProj + radius;
+	}
+
+	return dop;
+}
+
+static inline K14Dop kdopFromSphere(const Sphere& s)
+{
+	K14Dop dop;
+	// for now:
+	dop = kdopFromAABB(s.center - s.radius, s.center + s.radius);
+	for (int i = 0; i < KDOP_AXIS_COUNT; ++i)
+	{
+		// TODO: actually do this
+	}
+
+	return dop;
+}
+
 
 static inline PackedRef packChild(PrimType type, int index)
 {

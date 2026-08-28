@@ -52,7 +52,7 @@ float4 main(VSOutput input)
         float2 uv = (input.Pos.xy + offset) / shaderData.windowMax;
         uv = (uv - float2(0.5)) * float2(viewport_width, -viewport_height);
 
-        float3 direction = mul(shaderData.camera.rotationMatrix, float3(uv, focus_distance));
+        float3 direction = normalize(mul(shaderData.camera.rotationMatrix, float3(uv, focus_distance)));
         reset_ray(rayIndex, origin, direction);
     }
 
@@ -61,7 +61,7 @@ float4 main(VSOutput input)
     float2 uv = input.Pos.xy / shaderData.windowMax;
     float4 historyColor = previousFrame.Sample(uv);
     float weight = 1.0 / (shaderData.frameCount + 1.0);
-    float4 radianceSample = ray_color(rayIndex, shaderData.bvhRoot, bit_cast<PrimType>(shaderData.rootType), shaderData.camDir, lambertianLighting, shaderData.backgroundColor);
+    float4 radianceSample = ray_color(rayIndex, shaderData.sceneRoot, shaderData.camDir, lambertianLighting, shaderData.backgroundColor);
     
     float4 outColor = lerp(historyColor, radianceSample, weight);
 

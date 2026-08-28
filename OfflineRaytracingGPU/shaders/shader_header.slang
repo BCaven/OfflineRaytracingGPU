@@ -20,8 +20,7 @@ struct ShaderData
     int frameCount;
     float4 backgroundColor;
     Camera camera;
-    uint bvhRoot;
-    uint rootType;
+    uint sceneRoot;
     uint resetRays;
     float3 camDir;
     int bounceCount;

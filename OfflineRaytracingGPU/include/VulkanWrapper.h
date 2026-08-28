@@ -1591,6 +1591,8 @@ public:
 								s.center, PrimType::SPHERE, (int)i });
 		}
 		*/
+		// make this a separate TLAS structure or maybe just make everythng pass references in buildChildBVH and make the top structure the root
+
 		for (size_t i = 0; i < transforms.size(); ++i)
 		{
 			glm::vec3 min, max;
@@ -1839,12 +1841,131 @@ public:
 		glm::vec3 childMax;
 		return buildSAH(leaves, 0, leaves.size(), childMin, childMax);
 	}
+
+	PackedRef loadCollection(std::vector<PackedRef> references)
+	{
+		bool useKdop = references.size() > 8;
+		std::vector<LeafItem> leavesAABB;
+		std::vector<KDopLeaf> leavesKdop;
+
+		for (const auto& ref : references)
+		{
+			/*
+			leavesAABB.push_back(LeafItem{
+					.min = min,
+					.max = max,
+					.center = (min + max) * 0.5f,
+					.type = PrimType::TRIANGLE,
+					.index = (int)triangles.size()
+				});
+			*/
+			PrimType t = unpackType(ref);
+			int index = unpackIndex(ref);
+			glm::vec3 min(FLT_MAX);
+			glm::vec3 max(-FLT_MAX);
+			K14Dop dop;
+			switch (t)
+			{
+			case BVH_NODE:
+				//std::cout << "Adding a bvh node\n";
+				min = make_aabb_min(bvhNodes[index].left.min, bvhNodes[index].right.min);
+				max = make_aabb_max(bvhNodes[index].left.max, bvhNodes[index].right.max);
+				dop = kdopFromAABB(min, max);
+				break;
+			case KDOP_NODE:
+				//std::cout << "Adding a kdop node\n";
+
+				for (int i = 0; i < KDOP_WIDTH; i++)
+				{
+					min = make_aabb_min(min, kdopHotNodes[index].min_packed[i]);
+					max = make_aabb_max(max, kdopHotNodes[index].max[i]);
+				}
+				dop = kdopFromAABB(min, max); // yes this isnt correct, but whatever
+				break;
+			case TRIANGLE:
+				//std::cout << "Adding a triangle node\n";
+
+				max = make_aabb_max(make_aabb_max(triangles[index].v0, triangles[index].v1), triangles[index].v2);
+				min = make_aabb_min(make_aabb_min(triangles[index].v0, triangles[index].v1), triangles[index].v2);
+
+				max += KDOP_EPSILON;
+				min -= KDOP_EPSILON;
+				dop = kdopFromTriangle(triangles[index]);
+				break;
+			case SPHERE:
+				//std::cout << "Adding a sphere node\n";
+
+				min = spheres[index].center - spheres[index].radius;
+				max = spheres[index].center + spheres[index].radius;
+				dop = kdopFromSphere(spheres[index]);
+				break;
+			case GAUSSIAN_SPLAT:
+				//std::cout << "Adding a gs node\n";
+
+				min = splats[index].center - splats[index].halfExtent;
+				max = splats[index].center + splats[index].halfExtent;
+				dop = kdopFromGaussianSplat(splats[index].center, splats[index].rotation, 1.f / glm::sqrt(splats[index].invScale2), 0.01);
+				break;
+			case TRANSFORM:
+				//std::cout << "Adding a transform node\n";
+
+				getTransformMinMax(transforms[index], min, max);
+				dop = kdopFromAABB(min, max);
+				break;
+			default:
+				//std::cout << "Oops something else\n";
+
+				throw std::runtime_error("Not a supported type: " + t);
+				break;
+			}
+			//std::cout << "Min: < " << min.x << ", " << min.y << ", " << min.z << ">\n";
+
+			if (useKdop)
+			{
+				KDopLeaf leaf = KDopLeaf{
+					.type = t,
+					.index = index,
+					.center = (min + max) * 0.5f,
+					.kDop = dop
+				};
+				leavesKdop.push_back(leaf);
+			}
+			else
+			{
+				LeafItem leaf = LeafItem{
+								.min = min,
+								.max = max,
+								.center = (min + max) * 0.5f,
+								.type = t,
+								.index = index
+				};
+
+				leavesAABB.push_back(leaf);
+			}
+		}
+
+		int index = 0;
+		PrimType t = EMPTY;
+		if (useKdop)
+		{
+			K14Dop outDop;
+			int binaryKdop = build14DOP(leavesKdop, 0, leavesKdop.size(), outDop);
+			index = flattenKDop(binaryKdop);
+			t = KDOP_NODE;
+		}
+		else
+		{
+			index = buildChildBVH(leavesAABB);
+			t = BVH_NODE;
+		}
+
+		return packChild(t, index);
+	}
 	
 	PackedRef loadTransform(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale, PackedRef childRef)
 	{
 		PrimType childPrim = unpackType(childRef);
 		int childIndex = unpackIndex(childRef);
-		//assert(childPrim == BVH_NODE || KDOP_NODE);
 
 		constexpr float MIN_SCALE = 1e-8f;
 
@@ -1869,7 +1990,7 @@ public:
 			.childIndex = childIndex
 		};
 		transforms.push_back(transform);
-		return packChild(childPrim, transforms.size() - 1);
+		return packChild(PrimType::TRANSFORM, transforms.size() - 1);
 	}
 
 	PackedRef loadObj(std::string filepath, unsigned int materialIndex)
@@ -1915,8 +2036,8 @@ public:
 			max = make_aabb_max(make_aabb_max(v0, v1), v2);
 			min = make_aabb_min(make_aabb_min(v0, v1), v2);
 
-			max += 0.001f;
-			min -= 0.001f;
+			max += KDOP_EPSILON;
+			min -= KDOP_EPSILON;
 			Triangle t = Triangle{
 					.v0 = v0, .v1 = v1, .v2 = v2,
 					.normal = normal,
@@ -1951,7 +2072,7 @@ public:
 		if (useKdop)
 		{
 			K14Dop outDop;
-			int binaryKdop = build14DOP(leavesKdop, 0, leavesKdop.size() - 1, outDop);
+			int binaryKdop = build14DOP(leavesKdop, 0, leavesKdop.size(), outDop);
 			index = flattenKDop(binaryKdop);
 			t = KDOP_NODE;
 		}
@@ -2222,7 +2343,7 @@ public:
 		}
 
 		K14Dop outDop;
-		int binaryKdop = build14DOP(leaves, 0, leaves.size() - 1, outDop);
+		int binaryKdop = build14DOP(leaves, 0, leaves.size(), outDop);
 		return packChild(KDOP_NODE, flattenKDop(binaryKdop));
 	}
 
@@ -2414,7 +2535,27 @@ public:
 	bool draw()
 	{
 		// Sync
-		chk(vkWaitForFences(device, 1, &fences[frameIndex], true, UINT64_MAX));
+		constexpr uint64_t FENCE_TIMEOUT_NS = 3'000'000'000ull; // 3s, comfortably above default 2s TDR
+
+		VkResult waitResult = vkWaitForFences(device, 1, &fences[frameIndex], true, FENCE_TIMEOUT_NS);
+
+		if (waitResult == VK_TIMEOUT)
+		{
+			// Either still legitimately working (rare for a frame fence) or the
+			// device reset out from under you. Poke the device to find out which.
+			VkResult probe = vkQueueWaitIdle(queue); // cheap way to force VK_ERROR_DEVICE_LOST to surface
+			if (probe == VK_ERROR_DEVICE_LOST)
+			{
+				//handleDeviceLost(); // recreate device/swapchain/pipelines
+				std::cerr << "Failed to get device. Exiting\n";
+				exit(1);
+			}
+			// else: genuinely still running, decide whether to keep waiting or bail
+		}
+		else
+		{
+			chk(waitResult); // your existing chk() handles VK_SUCCESS/other errors
+		}
 
 		chk(vkResetFences(device, 1, &fences[frameIndex]));
 
