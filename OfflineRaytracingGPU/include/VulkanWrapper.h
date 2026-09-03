@@ -5,6 +5,9 @@
 #include "KeyInputs.h"
 #include <unordered_set>
 #include <bit>
+#include <execution>
+#include <limits>
+#include <future>
 
 constexpr uint32_t maxBounces{ 10 };
 constexpr uint32_t maxFramesInFlight{ 2 };
@@ -1606,7 +1609,117 @@ public:
 		return packChild(BVH_NODE, root);
 	}
 
+	int build14DOPWorker(
+		std::vector<KDopLeaf>& leaves,
+		int start, int end,
+		K14Dop& outKDop,
+		std::atomic<int>& nodeCounter,
+		TaskPool& pool,
+		int grainSize)
+	{
+		int count = end - start;
+		if (count <= 2)
+		{
+			K14Dop leftKDop = leaves[start].kDop;
+			unsigned int leftPacked = packChild(leaves[start].type, leaves[start].index);
+			K14Dop rightKDop = makeEmptyKDop();
+			unsigned int rightPacked = packChild(PrimType::EMPTY, 0);
+			if (count == 2)
+			{
+				rightKDop = leaves[start + 1].kDop;
+				rightPacked = packChild(leaves[start + 1].type, leaves[start + 1].index);
+			}
 
+			outKDop = mergeKDop(leftKDop, rightKDop);
+			int idx = nodeCounter.fetch_add(1, std::memory_order_relaxed);
+			kdopNodes[idx] = KDopNode{
+				.packedIndexType_left = leftPacked,
+				.packedIndexType_right = rightPacked,
+				.kDop_left = leftKDop,
+				.kDop_right = rightKDop
+			};
+			return idx;
+		}
+
+		glm::vec3 cMin(FLT_MAX), cMax(-FLT_MAX);
+		for (int i = start; i < end; ++i) {
+			cMin = make_aabb_min(leaves[i].center, cMin);
+			cMax = make_aabb_max(leaves[i].center, cMax);
+		}
+		glm::vec3 ext = cMax - cMin;
+		int axis = (ext.x > ext.y) ? (ext.x > ext.z ? 0 : 2) : (ext.y > ext.z ? 1 : 2);
+
+		std::sort(leaves.begin() + start, leaves.begin() + end,
+			[axis](const KDopLeaf& a, const KDopLeaf& b) { return a.center[axis] < b.center[axis]; });
+
+		int bestSplit = start + count / 2;
+		float bestCost = FLT_MAX;
+		int buckets = std::min(count - 1, 16);
+		for (int b = 1; b <= buckets; ++b)
+		{
+			int split = start + (count * b) / (buckets + 1);
+			if (split <= start || split >= end) continue;
+
+			K14Dop leftKDop = makeEmptyKDop(), rightKDop = makeEmptyKDop();
+			for (int i = start; i < split; ++i) leftKDop = mergeKDop(leftKDop, leaves[i].kDop);
+			for (int i = split; i < end; ++i) rightKDop = mergeKDop(rightKDop, leaves[i].kDop);
+
+			float cost = kdopSAHCost(leftKDop) * float(split - start) + kdopSAHCost(rightKDop) * float(end - split);
+			if (cost < bestCost) { bestCost = cost; bestSplit = split; }
+		}
+
+		K14Dop leftKDop, rightKDop;
+		int leftIndex, rightIndex;
+
+		if (count > grainSize)
+		{
+			std::atomic<bool> leftDone{ false };
+			pool.submit([&]() {
+				leftIndex = build14DOPWorker(leaves, start, bestSplit, leftKDop, nodeCounter, pool, grainSize);
+				leftDone.store(true, std::memory_order_release);
+				});
+
+			rightIndex = build14DOPWorker(leaves, bestSplit, end, rightKDop, nodeCounter, pool, grainSize);
+
+			// instead of blocking on the left child, help drain the queue
+			pool.helpWhile([&] { return leftDone.load(std::memory_order_acquire); });
+		}
+		else
+		{
+			leftIndex = build14DOPWorker(leaves, start, bestSplit, leftKDop, nodeCounter, pool, grainSize);
+			rightIndex = build14DOPWorker(leaves, bestSplit, end, rightKDop, nodeCounter, pool, grainSize);
+		}
+
+		outKDop = mergeKDop(leftKDop, rightKDop);
+		int idx = nodeCounter.fetch_add(1, std::memory_order_relaxed);
+		kdopNodes[idx] = KDopNode{
+			.packedIndexType_left = packChild(PrimType::KDOP_NODE, leftIndex),
+			.packedIndexType_right = packChild(PrimType::KDOP_NODE, rightIndex),
+			.kDop_left = leftKDop,
+			.kDop_right = rightKDop
+		};
+		return idx;
+	}
+
+	int build14DOP_parallel(std::vector<KDopLeaf>& leaves, int start, int end, K14Dop& outKDop)
+	{
+		int leafCount = end - start;
+		std::size_t base = kdopNodes.size();
+		kdopNodes.resize(base + static_cast<std::size_t>(2 * leafCount));
+		std::atomic<int> nodeCounter(static_cast<int>(base));
+
+		unsigned int hw = std::max(1u, std::thread::hardware_concurrency());
+		static TaskPool pool(hw); // persistent — reused across loads, not rebuilt per call
+
+		// tune this against your data; too small = task overhead dominates,
+		// too large = not enough tasks to fill all threads
+		int grainSize = std::max(64, leafCount / static_cast<int>(hw * 8));
+
+		int rootIndex = build14DOPWorker(leaves, start, end, outKDop, nodeCounter, pool, grainSize);
+
+		kdopNodes.resize(nodeCounter.load(std::memory_order_relaxed));
+		return rootIndex;
+	}
 
 	int build14DOP(std::vector<KDopLeaf>& leaves, int start, int end, K14Dop& outKDop)
 	{
@@ -2344,6 +2457,226 @@ public:
 
 		K14Dop outDop;
 		int binaryKdop = build14DOP(leaves, 0, leaves.size(), outDop);
+
+		return packChild(KDOP_NODE, flattenKDop(binaryKdop));
+	}
+
+	PackedRef loadSplat2(std::string filepath)
+	{
+		std::cout << "Loading " << filepath << "\n";
+
+		std::ifstream file(filepath, std::ios::binary);
+		if (!file) {
+			throw std::runtime_error("Could not open PLY file: " + filepath);
+		}
+
+		std::string line;
+		if (!std::getline(file, line) || line != "ply") {
+			throw std::runtime_error("Not a PLY file: " + filepath);
+		}
+
+		bool sawFormat = false;
+		bool inVertex = false;
+		std::size_t vertexCount = 0;
+		std::size_t rowStride = 0;
+		std::vector<plyDetail::Property> properties;
+
+		while (std::getline(file, line)) {
+			if (!line.empty() && line.back() == '\r') line.pop_back();
+			if (line == "end_header") break;
+
+			std::vector<std::string> words = plyDetail::splitWords(line);
+			if (words.empty() || words[0] == "comment") continue;
+
+			if (words[0] == "format") {
+				if (words.size() < 3 || words[1] != "binary_little_endian") {
+					throw std::runtime_error("Only binary_little_endian PLY files are supported");
+				}
+				sawFormat = true;
+				continue;
+			}
+
+			if (words[0] == "element") {
+				if (words.size() < 3) {
+					throw std::runtime_error("Malformed PLY element line: " + line);
+				}
+				inVertex = words[1] == "vertex";
+				if (inVertex) vertexCount = static_cast<std::size_t>(std::stoull(words[2]));
+				continue;
+			}
+
+			if (inVertex && words[0] == "property") {
+				if (words.size() < 3 || words[1] == "list") {
+					throw std::runtime_error("Only scalar vertex properties are supported");
+				}
+				plyDetail::Property property;
+				property.name = words[2];
+				property.type = words[1];
+				property.offset = rowStride;
+				property.size = plyDetail::scalarSize(property.type);
+				rowStride += property.size;
+				properties.push_back(property);
+			}
+		}
+
+		if (!sawFormat) throw std::runtime_error("PLY file is missing a format line");
+		if (vertexCount == 0) throw std::runtime_error("PLY file has no vertex records");
+
+		std::unordered_map<std::string, std::size_t> lookup;
+		for (std::size_t i = 0; i < properties.size(); ++i) lookup[properties[i].name] = i;
+
+		const plyDetail::Property& x = plyDetail::requireProperty(lookup, properties, "x");
+		const plyDetail::Property& y = plyDetail::requireProperty(lookup, properties, "y");
+		const plyDetail::Property& z = plyDetail::requireProperty(lookup, properties, "z");
+		const plyDetail::Property& dcR = plyDetail::requireProperty(lookup, properties, "f_dc_0");
+		const plyDetail::Property& dcG = plyDetail::requireProperty(lookup, properties, "f_dc_1");
+		const plyDetail::Property& dcB = plyDetail::requireProperty(lookup, properties, "f_dc_2");
+		const plyDetail::Property& opacity = plyDetail::requireProperty(lookup, properties, "opacity");
+		const plyDetail::Property& scale0 = plyDetail::requireProperty(lookup, properties, "scale_0");
+		const plyDetail::Property& scale1 = plyDetail::requireProperty(lookup, properties, "scale_1");
+		const plyDetail::Property& scale2 = plyDetail::requireProperty(lookup, properties, "scale_2");
+		const plyDetail::Property& rot0 = plyDetail::requireProperty(lookup, properties, "rot_0");
+		const plyDetail::Property& rot1 = plyDetail::requireProperty(lookup, properties, "rot_1");
+		const plyDetail::Property& rot2 = plyDetail::requireProperty(lookup, properties, "rot_2");
+		const plyDetail::Property& rot3 = plyDetail::requireProperty(lookup, properties, "rot_3");
+
+		std::vector<const plyDetail::Property*> shRest;
+		for (int i = 0; i < SH_REST_FLOAT_COUNT; ++i) {
+			auto it = lookup.find("f_rest_" + std::to_string(i));
+			if (it == lookup.end()) break;
+			shRest.push_back(&properties[it->second]);
+		}
+		if (lookup.find("f_rest_" + std::to_string(SH_REST_FLOAT_COUNT)) != lookup.end()) {
+			throw std::runtime_error("PLY has more spherical harmonic coefficients than this loads");
+		}
+		if (shRest.size() % SH_CHANNEL_COUNT != 0) {
+			throw std::runtime_error("PLY f_rest_* properties must contain the same count per RGB channel");
+		}
+		const std::size_t restCountPerChannel = shRest.size() / SH_CHANNEL_COUNT;
+		if (restCountPerChannel == 0) {
+			throw std::runtime_error("Failed to parse - restCountPerChannel was zero!");
+		}
+
+		// ---- single bulk read of all vertex data ----
+		std::vector<unsigned char> blob(rowStride * vertexCount);
+		file.read(reinterpret_cast<char*>(blob.data()), static_cast<std::streamsize>(blob.size()));
+		if (!file) {
+			throw std::runtime_error("PLY ended before all vertex records were read");
+		}
+
+		// ---- pre-size outputs so each vertex owns a fixed, race-free slot ----
+		const std::size_t baseShMat = shMats.size();
+		const std::size_t baseMat = materials.size();
+		const std::size_t baseSplat = splats.size();
+
+		shMats.resize(baseShMat + vertexCount);
+		materials.resize(baseMat + vertexCount);
+		splats.resize(baseSplat + vertexCount);
+		std::vector<KDopLeaf> leaves(vertexCount);
+
+		// per-vertex work, fully independent given the blob + pre-sized outputs
+		auto processVertex = [&](std::size_t i) {
+			const unsigned char* row = blob.data() + i * rowStride;
+			// small local adapter so plyDetail::readAsFloat's (row, property) signature still works
+			auto readAsFloat = [&](const plyDetail::Property& p) {
+				return plyDetail::readAsFloatPtr(row, p); // see note below
+				};
+
+			glm::vec3 center(readAsFloat(x), readAsFloat(y), readAsFloat(z));
+
+			std::array<float, SH_FLOAT_COUNT> sphericalHarmonics = {};
+			sphericalHarmonics[0] = readAsFloat(dcR);
+			sphericalHarmonics[1] = readAsFloat(dcG);
+			sphericalHarmonics[2] = readAsFloat(dcB);
+			for (std::size_t channel = 0; channel < SH_CHANNEL_COUNT; ++channel) {
+				for (std::size_t coeff = 0; coeff < restCountPerChannel; ++coeff) {
+					std::size_t plyRestIndex = channel * restCountPerChannel + coeff;
+					std::size_t splatCoeff = coeff + 1;
+					std::size_t splatIndex = splatCoeff * SH_CHANNEL_COUNT + channel;
+					sphericalHarmonics[splatIndex] = readAsFloat(*shRest[plyRestIndex]);
+				}
+			}
+
+			float raw_alpha = readAsFloat(opacity);
+			float alpha = 1.0f / (1.0f + std::exp(-raw_alpha));
+
+			glm::vec3 scale(
+				std::exp(readAsFloat(scale0)),
+				std::exp(readAsFloat(scale1)),
+				std::exp(readAsFloat(scale2))
+			);
+			glm::vec3 invScale2(1.f / (scale.x * scale.x), 1.f / (scale.y * scale.y), 1.f / (scale.z * scale.z));
+
+			glm::quat rotation(readAsFloat(rot0), readAsFloat(rot1), readAsFloat(rot2), readAsFloat(rot3));
+			rotation = glm::normalize(rotation);
+			glm::mat3 R = glm::mat3_cast(rotation);
+
+			float eps = 0.05f;
+			float k = std::sqrt(-2.0f * std::log(eps));
+			glm::vec3 axis0 = k * scale.x * glm::vec3(R[0]);
+			glm::vec3 axis1 = k * scale.y * glm::vec3(R[1]);
+			glm::vec3 axis2 = k * scale.z * glm::vec3(R[2]);
+			glm::vec3 halfExtent(
+				std::abs(axis0.x) + std::abs(axis1.x) + std::abs(axis2.x),
+				std::abs(axis0.y) + std::abs(axis1.y) + std::abs(axis2.y),
+				std::abs(axis0.z) + std::abs(axis1.z) + std::abs(axis2.z)
+			);
+
+			SphericalHarmonic shMat{ .degree = SH_REST_FLOAT_COUNT / (int)restCountPerChannel };
+			for (int c = 0; c < SH_COUNT; c++) {
+				int shIndex = c * SH_CHANNEL_COUNT;
+				shMat.sh[c] = glm::vec3(sphericalHarmonics[shIndex], sphericalHarmonics[shIndex + 1], sphericalHarmonics[shIndex + 2]);
+			}
+			shMats[baseShMat + i] = shMat;
+
+			Material mat{
+				.color = glm::vec4(0),
+				.metallicOrIor = 0,
+				.emissiveColor = glm::vec4(0),
+				.SHIndex = static_cast<int>(baseShMat + i)
+			};
+			materials[baseMat + i] = mat;
+
+			GaussianSplat gs{
+				.center = center,
+				.rotation = R,
+				.invScale2 = invScale2,
+				.alpha = alpha,
+				.materialIndex = (unsigned int) (baseMat + i),
+				.halfExtent = halfExtent
+			};
+			splats[baseSplat + i] = gs;
+
+			K14Dop dop = kdopFromGaussianSplat(center, R, scale, k);
+			leaves[i] = KDopLeaf{
+				.type = PrimType::GAUSSIAN_SPLAT,
+				.index = static_cast<int>(baseSplat + i),
+				.center = center,
+				.kDop = dop
+			};
+			};
+
+		std::cout << "Building threads\n";
+		// ---- chunked parallel dispatch ----
+		unsigned int threadCount = std::max(1u, std::thread::hardware_concurrency());
+		std::size_t chunkSize = (vertexCount + threadCount - 1) / threadCount;
+		std::vector<std::thread> workers;
+		workers.reserve(threadCount);
+
+		for (unsigned int t = 0; t < threadCount; ++t) {
+			std::size_t begin = t * chunkSize;
+			std::size_t end = std::min(vertexCount, begin + chunkSize);
+			if (begin >= end) break;
+			workers.emplace_back([&, begin, end]() {
+				for (std::size_t i = begin; i < end; ++i) processVertex(i);
+				});
+		}
+		for (auto& w : workers) w.join();
+		std::cout << "building tree\n";
+		K14Dop outDop;
+		int binaryKdop = build14DOP_parallel(leaves, 0, leaves.size(), outDop);
+
+		std::cout << "flattening tree\n";
 		return packChild(KDOP_NODE, flattenKDop(binaryKdop));
 	}
 

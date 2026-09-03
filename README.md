@@ -2,7 +2,7 @@
 
 Progressive Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 ![transforms](ProjectAssets/transformed_spheres.png)
-![5.9m splats](ProjectAssets/SplatInterior_FirstImage.png)
+![5.9m splats](ProjectAssets/SplatInterior.png)
 ![Second image](ProjectAssets/SuzanneWithSpheres.png)
 ![First image](ProjectAssets/FirstImage_Spheres.png)
 
@@ -71,8 +71,6 @@ By averaging samples across many rays, the path tracer simulates alpha blending 
 Read more about this type of gaussian splat ray tracing here: [Stochastic Ray Tracing of Transparent 3D Gaussians](https://arxiv.org/pdf/2504.06598)
 
 # References:
-
-This is an incomplete list of references used when making this project.
 
 Sun, Xin, et al. "Stochastic Ray Tracing of Transparent 3D Gaussians." arXiv preprint arXiv:2504.06598 (2025). \
 Feldman, Benjamin. (May 2026). “3D Gaussian Splatting in a Weekend”. bfeldman.me. https://bfeldman.me/3dgs-weekend/. \

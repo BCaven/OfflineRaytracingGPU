@@ -14,6 +14,8 @@
 
 using namespace std;
 
+using Collection = std::vector<PackedRef>;
+
 PackedRef suzannes_no_collectionsNxN(VK_Wrap& wrapper, int n)
 {
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
@@ -33,6 +35,7 @@ PackedRef suzannes_no_collectionsNxN(VK_Wrap& wrapper, int n)
 	}
 	return wrapper.loadCollection(suzannes);
 }
+
 PackedRef suzannes_row_instancesNxN(VK_Wrap& wrapper, int n)
 {
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
@@ -82,6 +85,7 @@ PackedRef suzannes_no_collectionsNxNxN(VK_Wrap& wrapper, int n)
 	}
 	return wrapper.loadCollection(suzannes);
 }
+
 PackedRef suzannes_row_instancesNxNxN(VK_Wrap& wrapper, int n)
 {
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
@@ -186,7 +190,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 			Material{ red, 0},							// 7
 			Material{ green, 0},						// 8
 			Material{ white, 0},						// 9
-			Material{ white, 0, light_white}			// 10
+			Material{ white, 0}			// 10
 	};
 
 	float radius = 12;
@@ -265,6 +269,73 @@ PackedRef flat_BLAS_TLAS(VK_Wrap& wrapper)
 	return packChild(EMPTY, 0);
 }
 
+PackedRef large_splat_demo(VK_Wrap& wrapper)
+{
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<> rand(0, 10);
+
+	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
+	glm::vec4 pastel_green = glm::vec4(143, 237, 82, 255) / 255.0f;
+	glm::vec4 pastel_blue = glm::vec4(83, 236, 228, 255) / 255.0f;
+	glm::vec4 pastel_purple = glm::vec4(181, 150, 243, 255) / 255.0f;
+	glm::vec4 pastel_grey = glm::vec4(139, 157, 180, 255) / 255.f;
+	glm::vec4 red = glm::vec4(1, 0, 0, 1);
+	glm::vec4 green = glm::vec4(0, 1, 0, 1);
+	glm::vec4 white = glm::vec4(1);
+
+	glm::vec4 light_white = glm::vec4(10);
+	glm::vec4 light_purple = 5.f * (glm::vec4(128, 0, 255, 255) / 255.f);
+	glm::vec4 sky = 20.f * (glm::vec4(4, 4, 4, 255) / 255.f);
+
+	wrapper.materials = std::vector<Material>{
+			Material{ pastel_orange, 1},				// 0
+			Material{ pastel_green, -1.5 },				// 1
+			Material{ pastel_blue, 0.5 },				// 2
+			Material{ pastel_purple, 0, light_white},	// 3
+			Material{ pastel_purple, 0, light_purple},	// 4
+			Material{ pastel_orange, 0},				// 5
+			Material{ pastel_grey, 0, light_white },					// 6
+			Material{ red, 0},							// 7
+			Material{ green, 0},						// 8
+			Material{ white, 0},						// 9
+			Material{ white, 0, light_white}			// 10
+	}; 
+
+	// TODO: maybe split this into chunks to easy traversal cost
+	PackedRef readingroomIndex = wrapper.loadSplat2("assets/readingroom_1x_180.ply");
+
+	Collection spheres;
+
+	float radius = 3;
+	float offset = 0; //radius / 2;
+	for (float r = 0; r < PI * 2; r += PI / 8)
+	{
+		wrapper.spheres.push_back(
+			Sphere{ glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), 0.5, (unsigned int)rand(gen) }
+		);
+	}
+
+	for (int i = 0; i < wrapper.spheres.size(); i++)
+	{
+		PackedRef p = packChild(PrimType::SPHERE, i);
+		float r = (rand(gen) + 1);
+		spheres.push_back(wrapper.loadTransform(glm::vec3(3, 0, 3), glm::vec3(0, 0, 0), glm::vec3(1, r / 5, 1), p));
+	}
+
+	PackedRef spheresPtr = wrapper.loadCollection(spheres);
+
+	wrapper.camera = CameraWrapper{
+	.origin = glm::vec3(0, 0.75, 1),
+	.fov = 20
+	};
+
+	wrapper.shaderData.backgroundColor = sky;
+
+	return wrapper.loadCollection({ spheresPtr, readingroomIndex});
+
+}
+
 int main(int argc, char* argv[])
 {
 	std::cout << "Hello World!\n";
@@ -272,56 +343,43 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 
 	PackedRef root = 0;
+	int choice = 7;
 
-	if (argc < 2)
-	{
-		int n = 1000;
-		auto suzanne_cube8b = suzannes_cube_instancesNxNxN(wrapper, n);
-		std::cout << "loaded cube of " << std::pow(2 * n, 3) << " instances\n";
-		int numCubes = 1;
-		float step = 1; // n * 2. * 3. * 100;
-		std::vector<PackedRef> cubeCollection;
-		for (int i = -numCubes; i < 0; i++) for (int j = -numCubes; j < 0; j++) for (int k = -numCubes; k < 0; k++)
-		{
-			
-			cubeCollection.push_back(
-				wrapper.loadTransform(
-					glm::vec3(i * step, j * step, k * step), glm::vec3(0, 0, 0), glm::vec3(-1 * i), suzanne_cube8b));
-		}
-		root = wrapper.loadCollection(cubeCollection);
-		std::cout << "loaded cube of cubes\n";
-	}
-	else
+	if (argc > 2)
 	{
 		int choice = std::atoi(argv[1]);
-		switch (choice)
-		{
-		case 0:
-			root = suzannes_no_collectionsNxN(wrapper, 1000);
-			break;
-		case 1:
-			root = suzannes_row_instancesNxN(wrapper, 1000);
-			break;
-		case 2:
-			root = suzannes_no_collectionsNxNxN(wrapper, 1000);
-			break;
-		case 3:
-			root = suzannes_row_instancesNxNxN(wrapper, 1000);
-			break;
-		case 4:
-			root = suzannes_cube_instancesNxNxN(wrapper, 1000);
-			break;
-		case 5:
-			root = nested_collections(wrapper);
-			break;
-		case 6:
-			root = flat_BLAS_TLAS(wrapper);
-			break;
-		default:
-			root = suzannes_row_instancesNxN(wrapper, 100);
-			break;
-		}
 	}
+	switch (choice)
+	{
+	case 0:
+		root = suzannes_no_collectionsNxN(wrapper, 1000);
+		break;
+	case 1:
+		root = suzannes_row_instancesNxN(wrapper, 1000);
+		break;
+	case 2:
+		root = suzannes_no_collectionsNxNxN(wrapper, 1000);
+		break;
+	case 3:
+		root = suzannes_row_instancesNxNxN(wrapper, 1000);
+		break;
+	case 4:
+		root = suzannes_cube_instancesNxNxN(wrapper, 1000);
+		break;
+	case 5:
+		root = nested_collections(wrapper);
+		break;
+	case 6:
+		root = flat_BLAS_TLAS(wrapper);
+		break;
+	case 7:
+		root = large_splat_demo(wrapper);
+		break;
+	default:
+		root = suzannes_row_instancesNxN(wrapper, 100);
+		break;
+	}
+	
 
 	wrapper.init();
 	wrapper.shaderData.sceneRoot = root;

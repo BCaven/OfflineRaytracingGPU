@@ -41,7 +41,7 @@ public float4 ray_color(int rayIndex, uint sceneRoot, float3 camDir, bool firstB
         // maybe do lambertian shading?
         // or depth? XD
         // float light = dot(intersection.normal, float3(0, 1, 0));
-        return float4(0.5 + (0.5* intersection.normal), 1);
+        return ray.scatter; // float4(0.5 + (0.5* intersection.normal), 1);
     }
 
     // TODO later: deal with emission > 1 that blow out the pixels

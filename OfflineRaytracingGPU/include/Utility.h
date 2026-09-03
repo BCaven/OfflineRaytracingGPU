@@ -2,6 +2,10 @@
 
 #include "VulkanHelper.h"
 
+#include <queue>
+#include <mutex>
+#include <thread>
+
 constexpr float PI = 3.1415926535;
 constexpr int SH_COUNT = 16;
 constexpr int SH_CHANNEL_COUNT = 3;
@@ -572,6 +576,31 @@ namespace plyDetail {
 		throw std::runtime_error("Unsupported PLY scalar type: " + type);
 	}
 
+	inline float readAsFloatPtr(const unsigned char* row, const Property& property) {
+		const unsigned char* ptr = row + property.offset;
+		const std::string& type = property.type;
+
+		if (type == "float" || type == "float32")
+			return readScalar<float>(ptr);
+		if (type == "double" || type == "float64")
+			return static_cast<float>(readScalar<double>(ptr));
+		if (type == "char" || type == "int8")
+			return static_cast<float>(readScalar<std::int8_t>(ptr));
+		if (type == "uchar" || type == "uint8")
+			return static_cast<float>(readScalar<std::uint8_t>(ptr));
+		if (type == "short" || type == "int16")
+			return static_cast<float>(readScalar<std::int16_t>(ptr));
+		if (type == "ushort" || type == "uint16")
+			return static_cast<float>(readScalar<std::uint16_t>(ptr));
+		if (type == "int" || type == "int32")
+			return static_cast<float>(readScalar<std::int32_t>(ptr));
+		if (type == "uint" || type == "uint32")
+			return static_cast<float>(readScalar<std::uint32_t>(ptr));
+
+		throw std::runtime_error("Unsupported PLY scalar type: " + type);
+	}
+
+
 	inline std::vector<std::string> splitWords(const std::string& line) {
 		std::vector<std::string> words;
 		std::string word;
@@ -727,3 +756,64 @@ static inline void validateKDopNodeHotLayout(slang::TypeLayoutReflection* layout
 	if (layout->getSize(uniform) != sizeof(KDopNodeHot))
 		throw std::runtime_error("KDopNodeHot final size mismatch");
 }
+
+class TaskPool {
+public:
+	explicit TaskPool(unsigned int threadCount) : stop(false) {
+		for (unsigned int i = 0; i < threadCount; ++i)
+			workers.emplace_back([this] { workerLoop(); });
+	}
+	~TaskPool() {
+		{ std::lock_guard<std::mutex> lock(mtx); stop = true; }
+		cv.notify_all();
+		for (auto& w : workers) w.join();
+	}
+
+	void submit(std::function<void()> task) {
+		{ std::lock_guard<std::mutex> lock(mtx); tasks.push(std::move(task)); }
+		cv.notify_one();
+	}
+
+	// Called by a thread that's logically "waiting" on other work (e.g. its
+	// forked-off child). Instead of blocking, it pulls and runs other queued
+	// tasks until pred() is satisfied — this is what keeps all threads busy.
+	template<class Pred>
+	void helpWhile(Pred pred) {
+		while (!pred()) {
+			std::function<void()> task;
+			{
+				std::unique_lock<std::mutex> lock(mtx);
+				if (tasks.empty()) {
+					cv.wait_for(lock, std::chrono::microseconds(50),
+						[&] { return !tasks.empty() || pred(); });
+					if (pred()) return;
+					if (tasks.empty()) continue;
+				}
+				task = std::move(tasks.front());
+				tasks.pop();
+			}
+			task();
+		}
+	}
+
+private:
+	void workerLoop() {
+		while (true) {
+			std::function<void()> task;
+			{
+				std::unique_lock<std::mutex> lock(mtx);
+				cv.wait(lock, [this] { return stop || !tasks.empty(); });
+				if (stop && tasks.empty()) return;
+				task = std::move(tasks.front());
+				tasks.pop();
+			}
+			task();
+		}
+	}
+
+	std::vector<std::thread> workers;
+	std::queue<std::function<void()>> tasks;
+	std::mutex mtx;
+	std::condition_variable cv;
+	bool stop;
+};
