@@ -164,7 +164,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	std::random_device rd;
 	std::mt19937 gen(rd());
-	std::uniform_int_distribution<> rand(0, 5);
+	std::uniform_int_distribution<> rand(0, 10);
 
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
 	glm::vec4 pastel_green = glm::vec4(143, 237, 82, 255) / 255.0f;
@@ -177,7 +177,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	glm::vec4 light_white = glm::vec4(10);
 	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
-	glm::vec4 sky = 20.f * (glm::vec4(4, 4, 4, 255) / 255.f);
+	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 1},				// 0
@@ -189,8 +189,8 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 			Material{ pastel_grey, 0 },					// 6
 			Material{ red, 0},							// 7
 			Material{ green, 0},						// 8
-			Material{ white, 0},						// 9
-			Material{ white, 0}			// 10
+			Material{ white, 0, light_white},			// 9
+			Material{ white, 0}							// 10
 	};
 
 	float radius = 12;
@@ -210,7 +210,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 		sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, r - 5, 0), glm::vec3(0, 0, 0), glm::vec3(1, r, 1), p));
 	}
 	auto sphereCollection = wrapper.loadCollection(sphereRing);
-	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 9);
+	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 10);
 	PackedRef wallIndex_ceiling = wrapper.loadObj("assets/plane.obj", 10);
 	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 8);
 	PackedRef wallIndex_red = wrapper.loadObj("assets/plane.obj", 7);
@@ -226,7 +226,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, beholderIndex);
 	//PackedRef readingroomIndex = wrapper.loadSplat("assets/readingroom_20x_180.ply");
 
-	//PackedRef tomatoIndex = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
+	PackedRef tomatoIndex = wrapper.loadSplat2("assets/tomatoes_10x_180.ply");
 
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, -1, 1), suzanneIndex);
 	//wrapper.loadTransform(glm::vec3(0, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1), icosphereIndex);
@@ -239,19 +239,19 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	// walls
 	auto wall_red = wrapper.loadTransform(glm::vec3(0, 0, 15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_red);
 	auto wall_green = wrapper.loadTransform(glm::vec3(0, 0, -15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_green);
-	auto wall_front = wrapper.loadTransform(glm::vec3(15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto wall_front = wrapper.loadTransform(glm::vec3(30, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
 	auto wall_back = wrapper.loadTransform(glm::vec3(-15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
 	auto cornellBox = wrapper.loadCollection({ floor, ceiling, wall_red, wall_green, wall_front, wall_back });
 
-	radius = 2;
+	radius = 4;
 	std::vector<PackedRef> suzanneRings;
-	for (float ring = 1; ring < 6; ring++) for (float r = 0; r < PI * 2; r += PI / (4 * ring))
+	for (float ring = 1; ring < 4; ring++) for (float r = 0; r < PI * 2; r += PI / (3 * ring))
 	{
-		suzanneRings.push_back(wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * (ring * radius)), -4, offset + (std::cos(r) * (ring * radius))), glm::vec3(0, 0, 0), glm::vec3(1), suzanneIndex));
+		suzanneRings.push_back(wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * (ring * radius)), 15, offset + (std::cos(r) * (ring * radius))), glm::vec3(0, 0, 0), glm::vec3(1), suzanneIndex));
 	}
 	auto suzanneCollection = wrapper.loadCollection(suzanneRings);
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), readingroomIndex);	
-	//wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(1), tomatoIndex);
+	auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(10), tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 	wrapper.camera = CameraWrapper{
@@ -261,7 +261,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return wrapper.loadCollection({ cornellBox, suzanneCollection, sphereCollection });
+	return wrapper.loadCollection({ cornellBox, sphereCollection, splatCollection });
 }
 
 PackedRef flat_BLAS_TLAS(VK_Wrap& wrapper)
@@ -343,7 +343,7 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 
 	PackedRef root = 0;
-	int choice = 7;
+	int choice = 5;
 
 	if (argc > 2)
 	{
