@@ -181,15 +181,15 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 1},				// 0
-			Material{ pastel_green, -1.5 },				// 1
+			Material{ pastel_green, -1.5, 50 },				// 1
 			Material{ pastel_blue, 0.5 },				// 2
-			Material{ pastel_purple, 0, light_white},	// 3
-			Material{ pastel_purple, 0, light_purple},	// 4
+			Material{ pastel_purple, 0, 0, light_white},	// 3
+			Material{ pastel_purple, 0, 0, light_purple},	// 4
 			Material{ pastel_orange, 0},				// 5
 			Material{ pastel_grey, 0 },					// 6
 			Material{ red, 0},							// 7
 			Material{ green, 0},						// 8
-			Material{ white, 0, light_white},			// 9
+			Material{ white, 0, 0, light_white},			// 9
 			Material{ white, 0}							// 10
 	};
 
@@ -290,16 +290,16 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 1},				// 0
-			Material{ pastel_green, -1.5 },				// 1
+			Material{ pastel_green, -1.8, 25},				// 1
 			Material{ pastel_blue, 0.5 },				// 2
-			Material{ pastel_purple, 0, light_white},	// 3
-			Material{ pastel_purple, 0, light_purple},	// 4
+			Material{ pastel_purple, 0, 0, light_white},	// 3
+			Material{ pastel_purple, 0, 0, light_purple},	// 4
 			Material{ pastel_orange, 0},				// 5
-			Material{ pastel_grey, 0, light_white },					// 6
+			Material{ pastel_grey, 0, 0, light_white },					// 6
 			Material{ red, 0},							// 7
 			Material{ green, 0},						// 8
 			Material{ white, 0},						// 9
-			Material{ white, 0, light_white}			// 10
+			Material{ white, 0, 0, light_white}			// 10
 	}; 
 
 	// TODO: maybe split this into chunks to easy traversal cost

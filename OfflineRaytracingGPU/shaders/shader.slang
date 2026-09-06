@@ -55,7 +55,7 @@ float4 main(VSOutput input)
     {
         weight /= 10 - shaderData.bounceCount;
     }
-    float4 radianceSample = ray_color(rayIndex, shaderData.sceneRoot, shaderData.camDir, lambertianLighting, shaderData.backgroundColor);
+    float4 radianceSample = ray_spectral(rayIndex, shaderData.sceneRoot, shaderData.camDir, lambertianLighting, shaderData.backgroundColor);
     
     float4 outColor = lerp(historyColor, radianceSample, weight);
 

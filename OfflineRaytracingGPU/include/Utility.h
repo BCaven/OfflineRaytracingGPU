@@ -59,6 +59,7 @@ struct Ray
 	glm::vec3 direction;
 	glm::vec4 scatter;
 	glm::vec4 emission;
+	float wavelength;
 };
 
 using PackedRef = unsigned int;
@@ -141,6 +142,7 @@ struct Material
 {
 	glm::vec4 color;
 	float metallicOrIor;
+	float abbe = 1;
 	glm::vec4 emissiveColor = glm::vec4(0);
 	int SHIndex = -1;
 };
