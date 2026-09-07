@@ -1,13 +1,8 @@
 # Offline GPU Path Tracer
 
-Progressive Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
-![transforms](ProjectAssets/transformed_spheres.png)
+Progressive Spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 ![5.9m splats](ProjectAssets/SplatInterior.png)
-![Second image](ProjectAssets/SuzanneWithSpheres.png)
-![First image](ProjectAssets/FirstImage_Spheres.png)
 
-8 billion instances of Suzanne:
-![8b Suzanne](ProjectAssets/8b_suzannes.png)
 
 # Project features
 
@@ -23,6 +18,7 @@ Progressive Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 - TLAS/BLAS separation
 - Mixed node types (transform, primitive, binary AABB, 8-wide KDOP)
 - Nested instances
+- Spectral sampling
 
 # Implementation details
 
@@ -76,3 +72,12 @@ Sun, Xin, et al. "Stochastic Ray Tracing of Transparent 3D Gaussians." arXiv pre
 Feldman, Benjamin. (May 2026). “3D Gaussian Splatting in a Weekend”. bfeldman.me. https://bfeldman.me/3dgs-weekend/. \
 Arman Uguray. "Ray Tracing: GPU Edition". https://raytracing.github.io/gpu-tracing/book/RayTracingGPUEdition.html. \
 Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with a short stack." Proceedings of the Conference on High-Performance Graphics. 2019.
+
+# Gallery
+![spectral scattering](ProjectAssets/IcospherePrism.png)
+![transforms](ProjectAssets/transformed_spheres.png)
+![Second image](ProjectAssets/SuzanneWithSpheres.png)
+![First image](ProjectAssets/FirstImage_Spheres.png)
+
+8 billion instances of Suzanne:
+![8b Suzanne](ProjectAssets/8b_suzannes.png)
