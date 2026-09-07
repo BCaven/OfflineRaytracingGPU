@@ -57,8 +57,8 @@ struct Ray
 {
 	glm::vec3 origin;
 	glm::vec3 direction;
-	glm::vec4 scatter;
-	glm::vec4 emission;
+	float scatter;
+	float emission;
 	float wavelength;
 };
 

@@ -180,17 +180,22 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
-			Material{ pastel_orange, 1},				// 0
+			Material{ pastel_orange, 1},					// 0
 			Material{ pastel_green, -1.5, 50 },				// 1
-			Material{ pastel_blue, 0.5 },				// 2
+			Material{ pastel_blue, 0.5 },					// 2
 			Material{ pastel_purple, 0, 0, light_white},	// 3
 			Material{ pastel_purple, 0, 0, light_purple},	// 4
-			Material{ pastel_orange, 0},				// 5
-			Material{ pastel_grey, 0 },					// 6
-			Material{ red, 0},							// 7
-			Material{ green, 0},						// 8
+			Material{ white, -1.8, 20},						// 5
+			Material{ pastel_grey, -1.7, 30 },				// 6
+			Material{ red, 0},								// 7
+			Material{ green, 0},							// 8
 			Material{ white, 0, 0, light_white},			// 9
-			Material{ white, 0}							// 10
+			Material{ white, 0},							// 10
+			Material{										// 11
+				.color = white,
+				.metallicOrIor = -1.8,
+				.abbe = 10,
+			}
 	};
 
 	float radius = 12;
@@ -206,8 +211,8 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	for (int i = 0; i < wrapper.spheres.size(); i++)
 	{
 		PackedRef p = packChild(PrimType::SPHERE, i);
-		float r = (rand(gen) + 1);
-		sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, r - 5, 0), glm::vec3(0, 0, 0), glm::vec3(1, r, 1), p));
+		float r = (rand(gen) + 1) / 5;
+		sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, r - 5, 0), glm::vec3(0, 0, 0), glm::vec3(1, r + 0.1, 1), p));
 	}
 	auto sphereCollection = wrapper.loadCollection(sphereRing);
 	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 10);
@@ -254,6 +259,18 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(10), tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
+	PackedRef prism = wrapper.loadObj("assets/icosphere2.obj", 11);
+	Collection prisms;
+	radius = 7;
+	for (float r = 0; r < PI * 2; r += PI / 8)
+	{
+		prisms.push_back(
+			wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * radius), -4, offset + (std::cos(r) * radius)), glm::vec3(0, rand(gen) / PI, 0), glm::vec3(1), prism)
+		);
+	}
+	auto prismCollection = wrapper.loadCollection(prisms);
+
+
 	wrapper.camera = CameraWrapper{
 		.origin = glm::vec3(0, 0.75, 1),
 		.fov = 20
@@ -261,7 +278,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return wrapper.loadCollection({ cornellBox, sphereCollection, splatCollection });
+	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection });
 }
 
 PackedRef flat_BLAS_TLAS(VK_Wrap& wrapper)
@@ -336,6 +353,75 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 
 }
 
+PackedRef prism_demo(VK_Wrap& wrapper)
+{
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_real_distribution<float> rand(-10, 10);
+
+	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
+	glm::vec4 pastel_green = glm::vec4(143, 237, 82, 255) / 255.0f;
+	glm::vec4 pastel_blue = glm::vec4(83, 236, 228, 255) / 255.0f;
+	glm::vec4 pastel_purple = glm::vec4(181, 150, 243, 255) / 255.0f;
+	glm::vec4 pastel_grey = glm::vec4(139, 157, 180, 255) / 255.f;
+	glm::vec4 red = glm::vec4(1, 0, 0, 1);
+	glm::vec4 green = glm::vec4(0, 1, 0, 1);
+	glm::vec4 white = glm::vec4(1);
+
+	glm::vec4 light_white = glm::vec4(10);
+	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
+	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
+
+	wrapper.materials = std::vector<Material>{
+			Material{ red, 0},							// 0
+			Material{ green, 0},						// 1
+			Material{ white, 0},						// 2
+			Material{ white, 0, 0, light_white},		// 3
+			Material{									// 4
+				.color = white,
+				.metallicOrIor = -1.8,
+				.abbe = 10,
+			}
+
+	};
+
+	// cornell box
+	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 2);
+	PackedRef wallIndex_ceiling = wrapper.loadObj("assets/plane.obj", 2);
+	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 1);
+	PackedRef wallIndex_red = wrapper.loadObj("assets/plane.obj", 0);
+	// floor
+	auto floor = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_white);
+	// ceiling
+	auto ceiling = wrapper.loadTransform(glm::vec3(0, 25, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_ceiling);
+	// walls
+	auto wall_red = wrapper.loadTransform(glm::vec3(0, 0, 15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_white);
+	auto wall_green = wrapper.loadTransform(glm::vec3(0, 0, -15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_white);
+	auto wall_front = wrapper.loadTransform(glm::vec3(15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto wall_back = wrapper.loadTransform(glm::vec3(-15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto cornellBox = wrapper.loadCollection({ floor, ceiling, wall_red, wall_green, wall_front, wall_back });
+
+
+	// prism
+	PackedRef prism = wrapper.loadObj("assets/icosphere2.obj", 4);
+	
+	auto prismInstance = wrapper.loadTransform(glm::vec3(0, -4, 0), glm::vec3(0, 0, 0), glm::vec3(1.5), prism);
+
+
+	wrapper.spheres.push_back(Sphere{
+		.center = glm::vec3(0, 0, 0),
+		.radius = 0.5,
+		.materialIndex = 3
+		});
+
+	auto leftLightWall = wrapper.loadTransform(glm::vec3(14, -4, 0.5), glm::vec3(PI / 2, 0, 0), glm::vec3(0.5, 0.1, 0.1), wallIndex_white);
+	auto rightLightWall = wrapper.loadTransform(glm::vec3(14, -4, -0.5), glm::vec3(PI / 2, 0, 0), glm::vec3(0.5, 0.1, 0.1), wallIndex_white);
+	auto topLightWall = wrapper.loadTransform(glm::vec3(14, -3.5, 0), glm::vec3(0), glm::vec3(0.5, 0.1, 0.1), wallIndex_white);
+	auto lightInstance = wrapper.loadTransform(glm::vec3(14, -4, 0), glm::vec3(0, 0, 0), glm::vec3(1), packChild(SPHERE, 0));
+
+	return wrapper.loadCollection({ cornellBox, prismInstance, lightInstance, leftLightWall, rightLightWall });
+}
+
 int main(int argc, char* argv[])
 {
 	std::cout << "Hello World!\n";
@@ -343,7 +429,7 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 
 	PackedRef root = 0;
-	int choice = 5;
+	int choice = 8;
 
 	if (argc > 2)
 	{
@@ -374,6 +460,9 @@ int main(int argc, char* argv[])
 		break;
 	case 7:
 		root = large_splat_demo(wrapper);
+		break;
+	case 8:
+		root = prism_demo(wrapper);
 		break;
 	default:
 		root = suzannes_row_instancesNxN(wrapper, 100);

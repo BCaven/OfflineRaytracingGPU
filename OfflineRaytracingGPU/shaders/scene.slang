@@ -15,37 +15,11 @@ __include shortstackKDOP;
 
 __include bvh;
 
-public float4 ray_color(int rayIndex, uint sceneRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor)
+
+float gaussian_linear(float lambda, float mu, float sigma)
 {
-    Ray ray = rays[rayIndex];
-    float4 throughputScatter = ray.scatter;
-    float4 throughputEmission = ray.emission;
-    float4 radianceSample = throughputScatter * throughputEmission;
-
-    uint rootIndex = unpackIndex(sceneRoot);
-    PrimType rootType = unpackType(sceneRoot);
-
-    // TODO maybe: let the user pick different traversal algorithms?
-    Intersection intersection = intersect_scene_wide_dfs(rayIndex, rootIndex, rootType);
-    if (!valid_intersection(intersection))
-    {
-        return throughputScatter * (throughputEmission + sky_color(ray, backgroundColor));
-    }
-    Material material = materials[intersection.materialIndex];
-
-    scatter(rayIndex, intersection, material, camDir);
-    ray = rays[rayIndex];
-
-    if (firstBounceDebug)
-    {
-        // maybe do lambertian shading?
-        // or depth? XD
-        // float light = dot(intersection.normal, float3(0, 1, 0));
-        return ray.scatter; // float4(0.5 + (0.5* intersection.normal), 1);
-    }
-
-    // TODO later: deal with emission > 1 that blow out the pixels
-    return ray.emission * ray.scatter;
+    float t = (lambda - mu) / sigma;
+    return exp(-0.5 * t * t);
 }
 
 float gaussian_log(float lambda, float mu, float sigma)
@@ -56,11 +30,11 @@ float gaussian_log(float lambda, float mu, float sigma)
 
 float3 cie_matching_functions(float lambda)
 {
-    // TODO: check these numbers :)
-    float x = 1.065 * gaussian_log(lambda, 599.8, 0.0264)
-            + 0.366 * gaussian_log(lambda, 442.0, 0.0624);
-    float y = 1.014 * gaussian_log(lambda, 556.3, 0.0075);
-    float z = 1.839 * gaussian_log(lambda, 449.8, 0.0243);
+    // Wyman, Sloan & Shirley 2013, single-lobe fit to CIE 1931 (Eq. 2)
+    float x = 1.065 * gaussian_linear(lambda, 595.8, 33.33)
+            + 0.366 * gaussian_linear(lambda, 446.8, 19.44);
+    float y = 1.014 * gaussian_log(lambda, 556.3, 0.075);
+    float z = 1.839 * gaussian_log(lambda, 449.8, 0.051);
     return float3(x, y, z);
 }
 
@@ -97,12 +71,18 @@ public float4 ray_spectral(int rayIndex, uint sceneRoot, float3 camDir, bool fir
 
     if (firstBounceDebug)
     {
-        retColor = spectral_sample_to_RGB(ray.scatter, ray.wavelength, lambda_pdf);
+        retColor = intersection.normal; //spectral_sample_to_RGB(ray.scatter, ray.wavelength, lambda_pdf);
     }
     else
     {
         retColor = spectral_sample_to_RGB(ray.emission, ray.wavelength, lambda_pdf);
     }
 
-    return float4(retColor, 1);
+    static const float3x3 XYZ_TO_SRGB = float3x3(
+     3.2406, -1.5372, -0.4986,
+    -0.9689, 1.8758, 0.0415,
+     0.0557, -0.2040, 1.0570
+    );
+    
+    return float4(mul(XYZ_TO_SRGB, retColor), 1);
 }

@@ -125,134 +125,6 @@ float luminance(float4 rgba)
     return dot(rgba, float4(0.2126, 0.7152, 0.0722, 1));
 }
 
-void scatter(int rayIndex, Intersection hit, Material material, float3 camDir)
-{
-    // TODO: microfacet BRDF
-    // Also TODO: energy
-
-    Ray input_ray = rays[rayIndex];
-
-    float3 incident = normalize(input_ray.direction);
-    float incident_dot_normal = dot(incident, hit.normal);
-    bool is_front_face = incident_dot_normal < 0;
-    float3 N = select(is_front_face, hit.normal, -hit.normal);
-    float cos_theta = abs(incident_dot_normal);
-    bool useSH = material.SHIndex >= 0;
-    bool is_transmissive = material.metallicOrIor < 0;
-    float ior = abs(material.metallicOrIor);
-    float ref_ratio = select(is_front_face, 1 / ior, ior);
-
-    // schlick approximation (1 - cos(theta))^5
-    float u = 1 - cos_theta;
-    float u5 = u * u * u * u * u;
-
-    bool choose_specular = false;
-    float4 attenuation = material.color;
-
-    if (useSH)
-    {
-        float3 dir = camDir;
-        choose_specular = false;
-        is_transmissive = false;
-        SphericalHarmonic shMat = shMats[material.SHIndex];
-        float3 result = SH_C0 * shMat.sh[0];
-        if (shMat.degree > 0)
-        {
-            float x = dir.x;
-            float y = dir.y;
-            float z = dir.z;
-            result = result - SH_C1 * y * shMat.sh[1] + SH_C1 * z * shMat.sh[2] - SH_C1 * x * shMat.sh[3];
-
-            if (shMat.degree > 1)
-            {
-                float xx = x * x, yy = y * y, zz = z * z;
-                float xy = x * y, yz = y * z, xz = x * z;
-                result = result +
-                    SH_C2[0] * xy * shMat.sh[4] +
-                    SH_C2[1] * yz * shMat.sh[5] +
-                         SH_C2[2] * (2.0f * zz - xx - yy) * shMat.sh[6] +
-                    SH_C2[3] * xz * shMat.sh[7] +
-                         SH_C2[4] * (xx - yy) * shMat.sh[8];
-
-                if (shMat.degree > 2)
-                {
-                    result = result +
-                        SH_C3[0] * y * (3.0f * xx - yy) * shMat.sh[9] +
-                        SH_C3[1] * xy * z * shMat.sh[10] +
-                             SH_C3[2] * y * (4.0f * zz - xx - yy) * shMat.sh[11] +
-                             SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * shMat.sh[12] +
-                             SH_C3[4] * x * (4.0f * zz - xx - yy) * shMat.sh[13] +
-                             SH_C3[5] * z * (xx - yy) * shMat.sh[14] +
-                             SH_C3[6] * x * (xx - 3.0f * yy) * shMat.sh[15];
-                }
-            }
-        }
-        result += 0.5f;
-        result = max(result, 0.f);
-        attenuation = float4(result, 1);
-    }
-    else if (is_transmissive)
-    {
-        bool cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1;
-        float f0 = schlick_f0_from_ior(ref_ratio);
-        choose_specular = cannot_refract || schlick_fresnel(f0, u5) > rand_float();
-        if (choose_specular)
-        {
-            attenuation = float4(1);
-        }
-    }
-    else if (material.metallicOrIor > 0)
-    {
-        float metallic = material.metallicOrIor;
-        float4 f0 = lerp(GLASS_F0, material.color, metallic);
-        float4 F = schlick_fresnel_f4(f0, u5);
-
-        float4 specular = F;
-        float4 diffuse = (material.color - GLASS_F0) * (1 - metallic) * (1 - u5) / 0.5;
-
-        float S = luminance(specular);
-        float D = luminance(diffuse);
-        float specular_pdf = S / (S + D);
-
-        choose_specular = specular_pdf > rand_float();
-        if (choose_specular)
-        {
-            attenuation = specular / specular_pdf;
-        }
-        else
-        {
-            attenuation = diffuse / (1 - specular_pdf);
-        }
-    }
-
-    float3 scattered = float3(0);
-    if (choose_specular)
-    {
-        scattered = reflect(incident, N);
-    }
-    else if (is_transmissive)
-    {
-        // I dont think this check should be necessary
-        float3 refracted = refract(incident, N, ref_ratio);
-        if (length(refracted) < EPSILON)
-        {
-            scattered = reflect(incident, N);
-        }
-        else
-        {
-            scattered = refracted;
-        }
-    }
-    else
-    {
-        scattered = sample_lamberian(N);
-    }
-
-    //Ray outputRay = Ray(point_on_ray(input_ray, hit.t), scattered, input_ray.scatter * attenuation, input_ray.emission + material.emissiveColor);
-
-    //rays[rayIndex] = outputRay;
-};
-
 float rgb_to_spectral(float4 rgb, float lambda)
 {
     float rResp = gaussian_log(lambda, 611.0, 0.05);
@@ -295,9 +167,7 @@ void scatter_spectral(int rayIndex, Intersection hit, Material material, float3 
 
     float lambda = input_ray.wavelength;
 
-    float ior = cauchy_ior(material.metallicOrIor, material.abbe, lambda);
-    float ref_ratio = select(is_front_face, 1 / ior, ior);
-
+    float ref_ratio = 1.f;
     // schlick approximation (1 - cos(theta))^5
     float u = 1 - cos_theta;
     float u5 = u * u * u * u * u;
@@ -351,12 +221,15 @@ void scatter_spectral(int rayIndex, Intersection hit, Material material, float3 
     float attenuation_scalar = spectral_albedo;
     if (is_transmissive)
     {
+
+        float ior = cauchy_ior(abs(material.metallicOrIor), material.abbe, lambda);
+        ref_ratio = select(is_front_face, 1 / ior, ior);
         bool cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1;
         float f0 = schlick_f0_from_ior(ref_ratio);
         choose_specular = cannot_refract || schlick_fresnel(f0, u5) > rand_float();
         attenuation_scalar = choose_specular ? 1.f : spectral_albedo;
     }
-    else if (material.metallicOrIor > 0)
+    else if (material.metallicOrIor > 0 && !useSH)
     {
         float metallic = material.metallicOrIor;
         float f0 = lerp(GLASS_F0_SCALAR, spectral_albedo, metallic);
