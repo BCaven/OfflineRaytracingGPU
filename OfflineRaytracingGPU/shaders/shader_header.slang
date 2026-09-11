@@ -24,10 +24,12 @@ struct ShaderData
     uint resetRays;
     float3 camDir;
     int bounceCount;
+    int readQueueLen;
 };
 
 // accumulation of previous samples
 Sampler2D previousFrame;
+RWTexture2D<uint3> currentFrameRGB;
 
 // Shared between vert and frag shaders
 

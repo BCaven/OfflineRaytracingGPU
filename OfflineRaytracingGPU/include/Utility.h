@@ -198,6 +198,7 @@ struct ShaderData
 	unsigned int resetRays;
 	glm::vec3 camDir;
 	int bounceCount;
+	int readQueueLen;
 };
 struct ShaderDataBuffer 
 {

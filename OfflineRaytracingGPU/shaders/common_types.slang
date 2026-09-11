@@ -21,6 +21,8 @@ public static const float SPLAT_CUTOFF = 8.;
 public static const int SH_COUNT = 16;
 public static const uint MAX_TRAVERSALS = 30000;
 
+public static const uint MAX_RAY_QUEUE = 9000000;
+
 public static const float SH_C0 = 0.28209479177387814f;
 public static const float SH_C1 = 0.4886025119029199f;
 public static const float SH_C2[] = {
@@ -55,6 +57,7 @@ public struct Ray
     public float scatter;
     public float emission;
     public float wavelength;
+    public uint2 index; // screen space uv index
 };
 
 struct Intersection

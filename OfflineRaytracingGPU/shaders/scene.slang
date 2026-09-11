@@ -46,43 +46,39 @@ float3 spectral_sample_to_RGB(float value, float lambda, float lambda_pdf)
     return (value / lambda_pdf) * xyz_response / CIE_Y_INTEGRAL;
 }
 
-public float4 ray_spectral(int rayIndex, uint sceneRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor)
+public float4 ray_spectral(Ray ray, uint sceneRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor)
 {
-    Ray ray = rays[rayIndex];
-
     uint rootIndex = unpackIndex(sceneRoot);
     PrimType rootType = unpackType(sceneRoot);
     float lambda_pdf = 1 / (730.f - 380.f);
-
-    Intersection intersection = intersect_scene_wide_dfs(rayIndex, rootIndex, rootType);
-    if (!valid_intersection(intersection))
-    {
-        float skySpectral = rgb_to_spectral(sky_color(ray, backgroundColor), ray.wavelength);
-        float finalRadiance = ray.emission + ray.scatter * skySpectral;
-        return float4(spectral_sample_to_RGB(finalRadiance, ray.wavelength, lambda_pdf), 1);
-    }
-    Material material = materials[intersection.materialIndex];
-
-    scatter_spectral(rayIndex, intersection, material, camDir);
-    ray = rays[rayIndex];
-
-    float3 retColor;
-    
-
-    if (firstBounceDebug)
-    {
-        retColor = intersection.normal; //spectral_sample_to_RGB(ray.scatter, ray.wavelength, lambda_pdf);
-    }
-    else
-    {
-        retColor = spectral_sample_to_RGB(ray.emission, ray.wavelength, lambda_pdf);
-    }
-
     static const float3x3 XYZ_TO_SRGB = float3x3(
      3.2406, -1.5372, -0.4986,
     -0.9689, 1.8758, 0.0415,
      0.0557, -0.2040, 1.0570
     );
+
+    Intersection intersection = intersect_scene_wide_dfs(ray, rootIndex, rootType);
+    if (!valid_intersection(intersection))
+    {
+        float skySpectral = rgb_to_spectral(sky_color(ray, backgroundColor), ray.wavelength);
+        float finalRadiance = ray.emission + ray.scatter * skySpectral;
+
+        return float4(mul(XYZ_TO_SRGB, spectral_sample_to_RGB(finalRadiance, ray.wavelength, lambda_pdf)), 1);
+    }
+    Material material = materials[intersection.materialIndex];
+
+    float2 spectral = scatter_spectral(ray, intersection, material, camDir);
+
+
+    // write spectral to currentFrameSpectral
+    float3 retColor = spectral_sample_to_RGB(spectral.y, ray.wavelength, lambda_pdf);
+    
+    if (firstBounceDebug)
+    {
+        retColor = intersection.normal; //spectral_sample_to_RGB(spectral.x, ray.wavelength, lambda_pdf);
+    }
+
+    
     
     return float4(mul(XYZ_TO_SRGB, retColor), 1);
 }

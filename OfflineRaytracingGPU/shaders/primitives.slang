@@ -14,11 +14,40 @@ public StructuredBuffer<KDopNodeHot> kdopHotNodes;
 public StructuredBuffer<K14DopNodeCold> kdopColdNodes;
 
 public StructuredBuffer<Transform> transforms;
-public RWStructuredBuffer<Ray> rays;
+public StructuredBuffer<Ray> rayQueueRead;
+public RWStructuredBuffer<Ray> rayQueueWrite;
+public RWStructuredBuffer<uint> counters;
 
-public void reset_ray(int rayIndex, float3 origin, float3 direction)
+
+public Ray makeRay(int rayIndex, float3 origin, float3 direction)
 {
-    rays[rayIndex] = Ray(origin, direction, 1, 0, 380.f + (rand_float() * (730.f - 380.f)));
+    // ignore counter index since we are ignoring previously written rays
+    // TODO: non-uniform samping
+    Ray newRay = Ray(origin, direction, 1, 0, 380.f + (rand_float() * (730.f - 380.f)));
+    return newRay;
+}
+public bool getRay(int rayIndex, int frameIndex, out Ray ray)
+{
+    int counterIndex = frameIndex % 2 == 0 ? 0 : 1; // readCounter
+    if (counters[counterIndex] <= rayIndex)
+    {
+        return false;
+    }
+    ray = rayQueueRead[rayIndex];
+    
+    return true;
+}
+
+void pushRayQueue(Ray ray, int frameIndex)
+{
+    int counterIndex = frameIndex % 2 == 0 ? 1 : 0; // writeCounter
+    uint count = 0;
+    InterlockedAdd(counters[counterIndex], 1, count);
+    if (count + 1 < MAX_RAY_QUEUE)
+    {
+        rayQueueWrite[count + 1] = ray;
+    }
+    
 }
 
 PrimType unpackType(uint packed)
@@ -150,12 +179,13 @@ float cauchy_ior(float n_d, float abbeNumber, float lambda_nm)
     return A + B * invSqL;
 }
 
-void scatter_spectral(int rayIndex, Intersection hit, Material material, float3 camDir)
+float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir)
 {
+    // TODO: this function needs to push rays to writeQueue
+    // probably easiest to return scatter and emission spectral so they can be used, since the input ray is dead
+
     // TODO: microfacet BRDF
     // get wavelength from ray
-
-    Ray input_ray = rays[rayIndex];
 
     float3 incident = normalize(input_ray.direction);
     float incident_dot_normal = dot(incident, hit.normal);
@@ -283,7 +313,10 @@ void scatter_spectral(int rayIndex, Intersection hit, Material material, float3 
     outputRay.scatter = input_ray.scatter * attenuation_scalar;
     outputRay.emission = input_ray.emission + input_ray.scatter * rgb_to_spectral(material.emissiveColor, lambda);
     outputRay.wavelength = input_ray.wavelength; // TODO change this to include hero sampling or something:)
-    rays[rayIndex] = outputRay;
+    // TODO: also need to have rays include their pdf or something
+    pushRayQueue(outputRay);
+
+    return float2(outputRay.scatter, outputRay.emission);
 };
 
 float3 point_on_ray(Ray ray, float t)

@@ -111,9 +111,8 @@ void processChild(
     }
 }
 
-Intersection intersect_scene_wide_dfs(int rayIndex, uint rootIndex, PrimType rootType)
+Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType rootType)
 {
-    Ray startRay = rays[rayIndex];
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
 

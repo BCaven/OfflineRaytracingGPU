@@ -12,7 +12,7 @@
 constexpr uint32_t maxBounces{ 10 };
 constexpr uint32_t maxFramesInFlight{ 2 };
 constexpr uint32_t numHistoryFrames{ 2 };
-constexpr uint32_t objectTypes{ 10 };
+constexpr uint32_t objectTypes{ 15 };
 constexpr glm::vec3 WORLD_UP{ 0, 1, 0 };
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -53,7 +53,6 @@ class VK_Wrap
 
 	VkShaderModule shaderModule{};
 	std::vector<VkPipelineShaderStageCreateInfo> shaderStages{};
-
 
 	std::array<ShaderDataBuffer, maxFramesInFlight> shaderDataBuffers;
 	std::array<Texture, 3> textures{};
@@ -158,7 +157,8 @@ public:
 	std::vector<GaussianSplat> splats;
 	std::vector<Transform> transforms;
 	std::vector<SphericalHarmonic> shMats;
-	std::vector<Ray> rayOrigins;
+	std::vector<Ray> rayQueueA;
+	std::vector<Ray> rayQueueB;
 	std::vector<KDopNode> kdopNodes;
 	std::vector<KDopNodeHot> kdopHotNodes;
 	std::vector<K14DopNodeCold> kdopColdNodes;
@@ -287,6 +287,9 @@ public:
 
 		initShaderCompiler();
 
+
+		// TODO: make the counter that says how many of these there are auto populate when one of these gets called
+
 		loadStructuredBuffer("spheres", spheres);
 
 		loadStructuredBuffer("triangles", triangles);
@@ -309,7 +312,12 @@ public:
 
 		loadStructuredBuffer("transforms", transforms);
 
-		loadStructuredBuffer("rays", rayOrigins, windowSize.x * windowSize.y);
+		int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
+		uint32_t initialGroupCount = 64;
+		loadStructuredBuffer<Ray>("rayQueueRead", {}, maxRaysPerQueue);
+		loadStructuredBuffer<Ray>("rayQueueWrite", {}, maxRaysPerQueue);
+		loadStructuredBuffer<uint32_t>("counters", std::vector<uint32_t>{0}, 2);
+
 
 
 		initHistoryImages();
@@ -318,26 +326,15 @@ public:
 
 		initBindings();
 
+		initComputePipeline();
+
 		initPipeline();
 
-		updateStructuredBufferDescriptors("spheres");
-
-		updateStructuredBufferDescriptors("triangles");
-
-		updateStructuredBufferDescriptors("splats");
-
-		updateStructuredBufferDescriptors("shMats");
-
-		updateStructuredBufferDescriptors("materials");
-		
-		updateStructuredBufferDescriptors("bvhNodes");
-
-		updateStructuredBufferDescriptors("kdopHotNodes");
-		updateStructuredBufferDescriptors("kdopColdNodes");
-		
-		updateStructuredBufferDescriptors("transforms");
-
-		updateStructuredBufferDescriptors("rays");
+		for (auto name : { 
+			"rayQueueWrite","rayQueueRead","counters",
+			"spheres", "triangles", "splats", "shMats", "materials", "bvhNodes", 
+			"kdopHotNodes", "kdopColdNodes", "transforms"})
+			updateStructuredBufferDescriptors(name);
 
 		for (auto& [name, b] : bindings)
 		{
@@ -1026,6 +1023,20 @@ public:
 
 	}
 
+	void initComputePipeline()
+	{
+		VkComputePipelineCreateInfo pipeInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+		pipeInfo.stage = {
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			nullptr, 0,
+			VK_SHADER_STAGE_COMPUTE_BIT,
+			shaderModule,
+			"computeMain"
+		};
+		pipeInfo.layout = pipelineLayout;
+		chk(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline));
+	}
+
 	void initPipeline()
 	{
 		// Pipeline
@@ -1102,8 +1113,9 @@ public:
 	}
 
 	template<typename T>
-	void loadStructuredBuffer(std::string bindingName, const std::vector<T>& data, size_t elementCount)
+	void loadStructuredBuffer(std::string bindingName, const std::vector<T>& data, size_t elementCount, VkBufferUsageFlags extraUsage = 0)
 	{
+		bool firstTime = true;
 		if (data.size() == 0 && elementCount == 0)
 		{
 			std::cout << bindingName << " was empty\n";
@@ -1116,7 +1128,7 @@ public:
 			auto& binding = structuredBufferBindings[bindingName];
 			vmaDestroyBuffer(allocator, binding.stagingBuffer, binding.stagingAllocation);
 			vmaDestroyBuffer(allocator, binding.buffer, binding.bufferAllocation);
-			
+			firstTime = false;
 			//return;
 		}
 		if (bindings.find(bindingName) == bindings.end())
@@ -1131,7 +1143,7 @@ public:
 		binding.bufferInfo = VkBufferCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = sizeof(T) * elementCount,
-			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | extraUsage,
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE
 		};
 		VmaAllocationCreateInfo allocCreateInfo{
@@ -1194,16 +1206,19 @@ public:
 		vkCmdPipelineBarrier2(cbOneTime, &barrierInfo);
 		endSingleTimeCommands(cbOneTime, fenceOneTime);
 
-		// step 3: descriptor set layout using reflected binding index
-		setBindings.push_back(
-			VkDescriptorSetLayoutBinding{
-				.binding = bindings[bindingName].binding,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
-			}
-			);
-
+		if (firstTime)
+		{
+			// step 3: descriptor set layout using reflected binding index
+			// only happens on first creation
+			setBindings.push_back(
+				VkDescriptorSetLayoutBinding{
+					.binding = bindings[bindingName].binding,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+				}
+				);
+		}
 		vkDestroyFence(device, fenceOneTime, nullptr);
 		vkFreeCommandBuffers(device, commandPool, 1, &cbOneTime);
 	}
@@ -2865,10 +2880,56 @@ public:
 		}
 	}
 
+	VkBufferMemoryBarrier2 bufferBarrier(
+		VkBuffer buffer,
+		VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+		VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess,
+		VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE)
+	{
+		return VkBufferMemoryBarrier2{
+			.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+			.srcStageMask = srcStage,
+			.srcAccessMask = srcAccess,
+			.dstStageMask = dstStage,
+			.dstAccessMask = dstAccess,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.buffer = buffer,
+			.offset = offset,
+			.size = size,
+		};
+	}
+
+	void bindStructuredBufferAs(std::string sourceBufferName, std::string targetBindingName, uint32_t frameInFlightIndex)
+	{
+		if (structuredBufferBindings.find(sourceBufferName) == structuredBufferBindings.end())
+		{
+			std::cout << "No buffer loaded for " << sourceBufferName << "\n";
+			return;
+		}
+		if (bindings.find(targetBindingName) == bindings.end())
+		{
+			std::cout << "Binding does not exist in reflection for " << targetBindingName << "\n";
+			return;
+		}
+
+		auto& source = structuredBufferBindings[sourceBufferName];
+		VkDescriptorBufferInfo descBufInfo{ .buffer = source.buffer, .range = VK_WHOLE_SIZE };
+		VkWriteDescriptorSet write{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = descriptorSets[frameInFlightIndex],
+			.dstBinding = bindings[targetBindingName].binding,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.pBufferInfo = &descBufInfo,
+		};
+		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+	}
+
 	bool draw()
 	{
 		// Sync
-		constexpr uint64_t FENCE_TIMEOUT_NS = 3'000'000'000ull; // 3s, comfortably above default 2s TDR
+		constexpr uint64_t FENCE_TIMEOUT_NS = 3'000'000'000ull; // 3s
 
 		VkResult waitResult = vkWaitForFences(device, 1, &fences[frameIndex], true, FENCE_TIMEOUT_NS);
 
@@ -2903,9 +2964,10 @@ public:
 		shaderData.camera.fov = camera.fov;
 		shaderData.camDir = glm::normalize(camera.direction);
 		shaderData.bounceCount = bounces;
+		// TODO: this should be the write counter from the previous run
+		shaderData.readQueueLen = windowSize.x * windowSize.y;
 		const bool firstBounce = bounces == 0;
 		const bool finalBounce = bounces == maxBounces - 1;
-
 		shaderData.resetRays = firstBounce;
 		++bounces;
 		
@@ -2921,7 +2983,9 @@ public:
 		int historyWriteIndex = 1 - historyReadIndex;
 		updateHistoryDescriptor();
 		
-
+		bool evenFrame = (frameIndex % 2 == 0);
+		bindStructuredBufferAs(evenFrame ? "rayQueueA" : "rayQueueB", "readQueue", frameIndex);
+		bindStructuredBufferAs(evenFrame ? "rayQueueB" : "rayQueueA", "writeQueue", frameIndex);
 
 		// Build command buffer
 		auto cb = commandBuffers[frameIndex];
@@ -2931,6 +2995,11 @@ public:
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT 
 		};
 		chk(vkBeginCommandBuffer(cb, &cbBI));
+
+		// compute pipeline
+
+
+		// Below is the graphics pipeline
 
 		// shader data
 		VkBufferMemoryBarrier2 shaderDataBarrier{
@@ -3090,8 +3159,8 @@ public:
 			pipelineLayout, 
 			VK_SHADER_STAGE_FRAGMENT_BIT, 
 			0, 
-			sizeof(ShaderData),  // <- this use to be VKPointer
-			&uploadedShaderData // <- used to be pointer to buffer
+			sizeof(ShaderData),
+			&uploadedShaderData
 		);
 		vkCmdDrawIndexed(cb, indexCount, 1, 0, 0, 0);
 		vkCmdEndRendering(cb);
@@ -3291,7 +3360,6 @@ public:
 		vkCmdPipelineBarrier2(cb, &presentDI);
 
 		swapchainImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		
 
 		chk(vkEndCommandBuffer(cb));
 		VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
