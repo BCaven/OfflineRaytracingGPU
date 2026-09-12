@@ -101,18 +101,6 @@ class VK_Wrap
 	uint32_t historyReadIndex{ 0 };
 	const VkFormat historyFormat{ VK_FORMAT_R32G32B32A32_SFLOAT };
 
-	// Frame image
-	// TODO: think hard about making support for arbitrary reflected resources
-	std::array<VkImage, numHistoryFrames> frameImages{};
-	std::array<VmaAllocation, numHistoryFrames> frameImageAllocations{};
-	std::array<VkImageView, numHistoryFrames> frameImageViews{};
-	std::array<VkImageLayout, numHistoryFrames> frameImageLayouts{
-		VK_IMAGE_LAYOUT_UNDEFINED
-	};
-	VkSampler frameSampler{ VK_NULL_HANDLE };
-	uint32_t frameReadIndex{ 0 };
-	const VkFormat frameFormat{ VK_FORMAT_R32G32B32A32_UINT };
-
 	std::array<VkDescriptorSet, maxFramesInFlight> descriptorSets;
 
 
@@ -676,7 +664,7 @@ public:
 		frameImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
-	void initHistoryImages()
+	void initHistoryImages(bool firstTime = true)
 	{
 		VkImageCreateInfo historyImageCI{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -727,78 +715,18 @@ public:
 		};
 		chk(vkCreateSampler(device, &samplerCI, nullptr, &historySampler));
 
-		// bindings:
-		setBindings.push_back(
-			VkDescriptorSetLayoutBinding{
-				.binding = bindings["previousFrame"].binding,
-				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-			}
-		);
-	}
-
-	void initFrameImages()
-	{
-		VkImageCreateInfo imageCI{
-			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-			.imageType = VK_IMAGE_TYPE_2D,
-			.format = historyFormat,
-			.extent{
-				.width = static_cast<uint32_t>(windowSize.x),
-				.height = static_cast<uint32_t>(windowSize.y),
-				.depth = 1
-			},
-			.mipLevels = 1, .arrayLayers = 1,
-			.samples = VK_SAMPLE_COUNT_1_BIT,
-			.tiling = VK_IMAGE_TILING_OPTIMAL,
-			.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
-					VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-					VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-					VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-		};
-		VmaAllocationCreateInfo allocCI{
-			.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
-			.usage = VMA_MEMORY_USAGE_AUTO
-		};
-		for (auto i = 0; i < numHistoryFrames; i++)
+		if (firstTime)
 		{
-			chk(vmaCreateImage(allocator, &imageCI, &allocCI, &historyImages[i], &historyImageAllocations[i], nullptr));
-			VkImageViewCreateInfo viewCI{
-				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-				.image = historyImages[i],
-				.viewType = VK_IMAGE_VIEW_TYPE_2D,
-				.format = historyFormat,
-				.subresourceRange{
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.levelCount = 1,
-					.layerCount = 1
+			// bindings:
+			setBindings.push_back(
+				VkDescriptorSetLayoutBinding{
+					.binding = bindings["previousFrame"].binding,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 				}
-			};
-			chk(vkCreateImageView(device, &viewCI, nullptr, &historyImageViews[i]));
+				);
 		}
-		VkSamplerCreateInfo samplerCI{
-			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-			.magFilter = VK_FILTER_LINEAR,
-			.minFilter = VK_FILTER_LINEAR,
-			.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-			.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-			.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-			.maxLod = 1.0f,
-		};
-		chk(vkCreateSampler(device, &samplerCI, nullptr, &historySampler));
-
-		// bindings:
-		setBindings.push_back(
-			VkDescriptorSetLayoutBinding{
-				.binding = bindings["previousFrame"].binding,
-				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-			}
-			);
-
 	}
 
 	void updateHistoryDescriptor()
@@ -3768,14 +3696,26 @@ public:
 			}
 
 			destroyHistoryImages();
-			initHistoryImages();
+			initHistoryImages(false);
+			historyImageLayouts.fill(VK_IMAGE_LAYOUT_UNDEFINED); // or however many history images you keep
 
 			destroyFrameImage();
 			initFrameImage();
+			frameImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			// destroy and reinit rayQueues and currentFrame image
 
-			resizeRaysBuffer(windowSize);
+			int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
+			uint32_t initialGroupCount = 64;
+			loadStructuredBuffer<Ray>("rayQueueA", {}, maxRaysPerQueue);
+			loadStructuredBuffer<Ray>("rayQueueB", {}, maxRaysPerQueue);
 
-			// TODO: destroy and reinit 
+			loadStorageImage("currentFrameRGB", windowSize.x, windowSize.y, VK_FORMAT_R32G32B32A32_SFLOAT);
+
+			updateStructuredBufferDescriptors("rayQueueA");
+			updateStructuredBufferDescriptors("rayQueueB");
+
+			updateImageDescriptors("currentFrameRGB");
+
 
 			for (auto& semaphore : renderCompleteSemaphores) {
 				vkDestroySemaphore(device, semaphore, nullptr);

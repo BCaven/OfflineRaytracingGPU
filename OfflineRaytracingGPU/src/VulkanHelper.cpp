@@ -256,7 +256,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	}
 	auto suzanneCollection = wrapper.loadCollection(suzanneRings);
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), readingroomIndex);	
-	auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(10), tomatoIndex);
+	auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(1), tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 	PackedRef prism = wrapper.loadObj("assets/icosphere2.obj", 11);
@@ -265,7 +265,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	for (float r = 0; r < PI * 2; r += PI / 8)
 	{
 		prisms.push_back(
-			wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * radius), -4, offset + (std::cos(r) * radius)), glm::vec3(0, rand(gen) / PI, 0), glm::vec3(1), prism)
+			wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), glm::vec3(0, rand(gen) / PI, 0), glm::vec3(1), prism)
 		);
 	}
 	auto prismCollection = wrapper.loadCollection(prisms);
@@ -278,7 +278,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection });
+	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection, splatCollection, suzanneCollection });
 }
 
 PackedRef flat_BLAS_TLAS(VK_Wrap& wrapper)

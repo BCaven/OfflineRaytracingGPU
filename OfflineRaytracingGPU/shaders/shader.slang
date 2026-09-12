@@ -29,8 +29,8 @@ float4 main(VSOutput input)
     float4 historyColor = previousFrame.Sample(historyUV);
 
     int2 pixelCoord = int2(input.Pos.xy); // integer pixel space, for storage image indexing
-    float4 radianceSample = currentFrameRGB[pixelCoord];
 
+    float4 radianceSample = currentFrameRGB[pixelCoord];
     float weight = 1.0 / (shaderData.frameCount + 1.0);
     if (weight < 1)
     {
@@ -82,14 +82,15 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
 {
 
     uint index = threadId.x;
-    float2 screenCoords = float2(index % shaderData.windowMax.x, (index - (index % shaderData.windowMax.x)) / shaderData.windowMax.x);
-    init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount);
+    uint wrappedIndex = index % (shaderData.windowMax.x * shaderData.windowMax.y);
+    float2 screenCoords = float2(wrappedIndex % shaderData.windowMax.x, (wrappedIndex - (wrappedIndex % shaderData.windowMax.x)) / shaderData.windowMax.x);
+    init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount + index);
 
     uint numStartRays = shaderData.windowMax.x * shaderData.windowMax.y;
     Ray ray;
     bool validRay = false;
     // dont have a thread that is outside the screen generate a ray
-    if ((bool) shaderData.resetRays && index < numStartRays)
+    if ((bool) shaderData.resetRays)
     {
         // generate new ray
         float3 origin = shaderData.camera.origin;
