@@ -14,16 +14,16 @@ public StructuredBuffer<KDopNodeHot> kdopHotNodes;
 public StructuredBuffer<K14DopNodeCold> kdopColdNodes;
 
 public StructuredBuffer<Transform> transforms;
-public StructuredBuffer<Ray> rayQueueRead;
-public RWStructuredBuffer<Ray> rayQueueWrite;
+public RWStructuredBuffer<Ray> rayQueueA;
+public RWStructuredBuffer<Ray> rayQueueB;
 public RWStructuredBuffer<uint> counters;
 
 
-public Ray makeRay(int rayIndex, float3 origin, float3 direction)
+public Ray makeRay(uint2 rayCoord, float3 origin, float3 direction)
 {
     // ignore counter index since we are ignoring previously written rays
     // TODO: non-uniform samping
-    Ray newRay = Ray(origin, direction, 1, 0, 380.f + (rand_float() * (730.f - 380.f)));
+    Ray newRay = Ray(origin, direction, 1, 0, 380.f + (rand_float() * (730.f - 380.f)), rayCoord);
     return newRay;
 }
 public bool getRay(int rayIndex, int frameIndex, out Ray ray)
@@ -31,9 +31,17 @@ public bool getRay(int rayIndex, int frameIndex, out Ray ray)
     int counterIndex = frameIndex % 2 == 0 ? 0 : 1; // readCounter
     if (counters[counterIndex] <= rayIndex)
     {
+        ray = Ray();
         return false;
     }
-    ray = rayQueueRead[rayIndex];
+    if (counterIndex == 0)
+    {
+        ray = rayQueueA[rayIndex];
+    }
+    else
+    {
+        ray = rayQueueB[rayIndex];
+    }
     
     return true;
 }
@@ -43,11 +51,17 @@ void pushRayQueue(Ray ray, int frameIndex)
     int counterIndex = frameIndex % 2 == 0 ? 1 : 0; // writeCounter
     uint count = 0;
     InterlockedAdd(counters[counterIndex], 1, count);
-    if (count + 1 < MAX_RAY_QUEUE)
+    if (count < MAX_RAY_QUEUE)
     {
-        rayQueueWrite[count + 1] = ray;
+        if (counterIndex == 0)
+        {
+            rayQueueA[count] = ray;
+        }
+        else
+        {
+            rayQueueB[count] = ray;
+        }
     }
-    
 }
 
 PrimType unpackType(uint packed)
@@ -179,7 +193,7 @@ float cauchy_ior(float n_d, float abbeNumber, float lambda_nm)
     return A + B * invSqL;
 }
 
-float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir)
+float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir, int frameIndex)
 {
     // TODO: this function needs to push rays to writeQueue
     // probably easiest to return scatter and emission spectral so they can be used, since the input ray is dead
@@ -313,8 +327,9 @@ float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, floa
     outputRay.scatter = input_ray.scatter * attenuation_scalar;
     outputRay.emission = input_ray.emission + input_ray.scatter * rgb_to_spectral(material.emissiveColor, lambda);
     outputRay.wavelength = input_ray.wavelength; // TODO change this to include hero sampling or something:)
+    outputRay.index = input_ray.index; // they point to the same pixel
     // TODO: also need to have rays include their pdf or something
-    pushRayQueue(outputRay);
+    pushRayQueue(outputRay, frameIndex);
 
     return float2(outputRay.scatter, outputRay.emission);
 };
@@ -559,7 +574,7 @@ uint sortChildrenByDistance(uint validMask, float tHit[KDOP_WIDTH], out uint sor
     [unroll]
     for (uint slot = 0; slot < KDOP_WIDTH; ++slot)
     {
-        if (validMask & (1u << slot))
+        if ((bool) (validMask & (1u << slot)))
         {
             sortedSlots[count] = slot;
             count++;

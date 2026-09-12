@@ -31,7 +31,8 @@ class VK_Wrap
 	bool updateSwapchain{ false };
 	VkSwapchainKHR swapchain{ VK_NULL_HANDLE };
 	VkCommandPool commandPool{ VK_NULL_HANDLE };
-	VkPipeline pipeline{ VK_NULL_HANDLE };
+	VkPipeline graphicsPipeline{ VK_NULL_HANDLE };
+	VkPipeline computePipeline{ VK_NULL_HANDLE };
 	VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
 	VkImage depthImage;
 	VmaAllocator allocator{ VK_NULL_HANDLE };
@@ -100,6 +101,18 @@ class VK_Wrap
 	uint32_t historyReadIndex{ 0 };
 	const VkFormat historyFormat{ VK_FORMAT_R32G32B32A32_SFLOAT };
 
+	// Frame image
+	// TODO: think hard about making support for arbitrary reflected resources
+	std::array<VkImage, numHistoryFrames> frameImages{};
+	std::array<VmaAllocation, numHistoryFrames> frameImageAllocations{};
+	std::array<VkImageView, numHistoryFrames> frameImageViews{};
+	std::array<VkImageLayout, numHistoryFrames> frameImageLayouts{
+		VK_IMAGE_LAYOUT_UNDEFINED
+	};
+	VkSampler frameSampler{ VK_NULL_HANDLE };
+	uint32_t frameReadIndex{ 0 };
+	const VkFormat frameFormat{ VK_FORMAT_R32G32B32A32_UINT };
+
 	std::array<VkDescriptorSet, maxFramesInFlight> descriptorSets;
 
 
@@ -109,6 +122,10 @@ class VK_Wrap
 	std::unordered_map<std::string, ResourceBinding> bindings;
 
 	std::unordered_map<std::string, StructuredBufferBinding> structuredBufferBindings{};
+
+	std::unordered_map<std::string, ImageBinding> imageBindings{};
+
+	VkBuffer countersBuffer{ VK_NULL_HANDLE };
 
 	KeyInputs& inputs = KeyInputs::inputHandler();
 
@@ -180,6 +197,13 @@ public:
 			vmaDestroyBuffer(allocator, binding.buffer, binding.bufferAllocation);
 		}		
 
+		for (auto& [name, binding] : imageBindings)
+		{
+			vkDestroyImageView(device, binding.view, nullptr);
+			vmaDestroyImage(allocator, binding.image, binding.imageAllocation);
+		}
+		imageBindings.clear();
+
 		destroyHistoryImages();
 
 		destroyFrameImage();
@@ -205,7 +229,8 @@ public:
 		
 		//vkDestroyDescriptorSetLayout(device, descriptorSetLayoutTex, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-		vkDestroyPipeline(device, pipeline, nullptr);
+		vkDestroyPipeline(device, graphicsPipeline, nullptr);
+		vkDestroyPipeline(device, computePipeline, nullptr);
 		vkDestroySwapchainKHR(device, swapchain, nullptr);
 
 		vkDestroyCommandPool(device, commandPool, nullptr);
@@ -314,11 +339,11 @@ public:
 
 		int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
 		uint32_t initialGroupCount = 64;
-		loadStructuredBuffer<Ray>("rayQueueRead", {}, maxRaysPerQueue);
-		loadStructuredBuffer<Ray>("rayQueueWrite", {}, maxRaysPerQueue);
+		loadStructuredBuffer<Ray>("rayQueueA", {}, maxRaysPerQueue);
+		loadStructuredBuffer<Ray>("rayQueueB", {}, maxRaysPerQueue);
 		loadStructuredBuffer<uint32_t>("counters", std::vector<uint32_t>{0}, 2);
 
-
+		loadStorageImage("currentFrameRGB", windowSize.x, windowSize.y, VK_FORMAT_R32G32B32A32_SFLOAT);
 
 		initHistoryImages();
 
@@ -326,21 +351,35 @@ public:
 
 		initBindings();
 
+		initPipelineLayout();
+
 		initComputePipeline();
 
 		initPipeline();
 
 		for (auto name : { 
-			"rayQueueWrite","rayQueueRead","counters",
+			"rayQueueA","rayQueueB","counters",
 			"spheres", "triangles", "splats", "shMats", "materials", "bvhNodes", 
 			"kdopHotNodes", "kdopColdNodes", "transforms"})
 			updateStructuredBufferDescriptors(name);
+
+		updateImageDescriptors("currentFrameRGB");
+
 
 		for (auto& [name, b] : bindings)
 		{
 			std::cout << name << " binding " << b.binding << " set " << b.set << '\n';
 		}
 
+		// set countersBuffer
+		if (structuredBufferBindings.find("counters") != structuredBufferBindings.end())
+		{
+			countersBuffer = structuredBufferBindings["counters"].buffer;
+		}
+		else
+		{
+			std::cout << "Oh no, could not find counters buffer!\n";
+		}
 		initVertices();
 
 		initShaderData();	
@@ -697,6 +736,68 @@ public:
 				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 			}
 		);
+	}
+
+	void initFrameImages()
+	{
+		VkImageCreateInfo imageCI{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType = VK_IMAGE_TYPE_2D,
+			.format = historyFormat,
+			.extent{
+				.width = static_cast<uint32_t>(windowSize.x),
+				.height = static_cast<uint32_t>(windowSize.y),
+				.depth = 1
+			},
+			.mipLevels = 1, .arrayLayers = 1,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.tiling = VK_IMAGE_TILING_OPTIMAL,
+			.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+					VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+					VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+					VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+		};
+		VmaAllocationCreateInfo allocCI{
+			.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+			.usage = VMA_MEMORY_USAGE_AUTO
+		};
+		for (auto i = 0; i < numHistoryFrames; i++)
+		{
+			chk(vmaCreateImage(allocator, &imageCI, &allocCI, &historyImages[i], &historyImageAllocations[i], nullptr));
+			VkImageViewCreateInfo viewCI{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+				.image = historyImages[i],
+				.viewType = VK_IMAGE_VIEW_TYPE_2D,
+				.format = historyFormat,
+				.subresourceRange{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
+			};
+			chk(vkCreateImageView(device, &viewCI, nullptr, &historyImageViews[i]));
+		}
+		VkSamplerCreateInfo samplerCI{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.magFilter = VK_FILTER_LINEAR,
+			.minFilter = VK_FILTER_LINEAR,
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.maxLod = 1.0f,
+		};
+		chk(vkCreateSampler(device, &samplerCI, nullptr, &historySampler));
+
+		// bindings:
+		setBindings.push_back(
+			VkDescriptorSetLayoutBinding{
+				.binding = bindings["previousFrame"].binding,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+			}
+			);
 
 	}
 
@@ -813,7 +914,7 @@ public:
 			.pDynamicState = &dynamicState,
 			.layout = pipelineLayout
 		};
-		chk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+		chk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &graphicsPipeline));
 
 		// The "screen" that rays will get shot out of in the fragment shader
 		// Since we arent using any of the intrinsics
@@ -1023,6 +1124,22 @@ public:
 
 	}
 
+	void initPipelineLayout()
+	{
+		VkPushConstantRange pushConstantRange{
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+			.size = sizeof(ShaderData)
+		};
+		VkPipelineLayoutCreateInfo pipelineLayoutCI{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = 1,
+			.pSetLayouts = &descriptorSetLayout,
+			.pushConstantRangeCount = 1,
+			.pPushConstantRanges = &pushConstantRange
+		};
+		chk(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
+	}
+
 	void initComputePipeline()
 	{
 		VkComputePipelineCreateInfo pipeInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
@@ -1034,24 +1151,11 @@ public:
 			"computeMain"
 		};
 		pipeInfo.layout = pipelineLayout;
-		chk(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &pipeline));
+		chk(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &computePipeline));
 	}
 
 	void initPipeline()
 	{
-		// Pipeline
-		VkPushConstantRange pushConstantRange{
-			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-			.size = sizeof(ShaderData)
-		};
-		VkPipelineLayoutCreateInfo pipelineLayoutCI{
-			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			.setLayoutCount = 1,
-			.pSetLayouts = &descriptorSetLayout,
-			.pushConstantRangeCount = 1,
-			.pPushConstantRanges = &pushConstantRange
-		};
-		chk(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 		shaderStages = std::vector<VkPipelineShaderStageCreateInfo>{
 			{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -1072,15 +1176,15 @@ public:
 	void initBindings()
 	{
 		
-		VkDescriptorSetLayoutCreateInfo sphereSetLayoutCI{
+		VkDescriptorSetLayoutCreateInfo setLayoutCI{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 			.bindingCount = static_cast<uint32_t>(setBindings.size()),
 			.pBindings = setBindings.data()
 		};
-		chk(vkCreateDescriptorSetLayout(device, &sphereSetLayoutCI, nullptr, &descriptorSetLayout));
+		chk(vkCreateDescriptorSetLayout(device, &setLayoutCI, nullptr, &descriptorSetLayout));
 
 
-		std::array<VkDescriptorPoolSize, objectTypes + 1> poolSizes{};
+		std::array<VkDescriptorPoolSize, objectTypes + 2> poolSizes{};
 		for (int i = 0; i < objectTypes; i++)
 		{
 			poolSizes[i] = VkDescriptorPoolSize{
@@ -1092,6 +1196,11 @@ public:
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				.descriptorCount = maxFramesInFlight
 		};
+		poolSizes[objectTypes + 1] = VkDescriptorPoolSize{
+				.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+				.descriptorCount = maxFramesInFlight
+		};
+
 		VkDescriptorPoolCreateInfo poolCI{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.maxSets = maxFramesInFlight,
@@ -1103,13 +1212,146 @@ public:
 		std::array<VkDescriptorSetLayout, maxFramesInFlight> layouts;
 		layouts.fill(descriptorSetLayout);
 
-		VkDescriptorSetAllocateInfo sphereSetAllocInfo{
+		VkDescriptorSetAllocateInfo setAllocInfo{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 			.descriptorPool = descriptorPool,
 			.descriptorSetCount = maxFramesInFlight,
 			.pSetLayouts = layouts.data()
 		};
-		chk(vkAllocateDescriptorSets(device, &sphereSetAllocInfo, descriptorSets.data()));
+		chk(vkAllocateDescriptorSets(device, &setAllocInfo, descriptorSets.data()));
+	}
+
+	void loadStorageImage(std::string bindingName, uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags extraUsage = 0)
+	{
+		bool firstTime = true;
+		if (imageBindings.find(bindingName) != imageBindings.end())
+		{
+			std::cout << "Image already exists for " << bindingName << "\n";
+			auto& old = imageBindings[bindingName];
+			vkDestroyImageView(device, old.view, nullptr);
+			vmaDestroyImage(allocator, old.image, old.imageAllocation);
+			firstTime = false;
+		}
+		if (bindings.find(bindingName) == bindings.end())
+		{
+			std::cout << "Binding does not exist in reflection for " << bindingName << "\n";
+			return;
+		}
+
+		auto& binding = imageBindings[bindingName];
+		binding.format = format;
+		binding.extent = { width, height };
+
+		VkImageCreateInfo imageInfo{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType = VK_IMAGE_TYPE_2D,
+			.format = format,
+			.extent = { width, height, 1 },
+			.mipLevels = 1,
+			.arrayLayers = 1,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.tiling = VK_IMAGE_TILING_OPTIMAL,
+			.usage = VK_IMAGE_USAGE_STORAGE_BIT | extraUsage,
+			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		};
+		VmaAllocationCreateInfo allocCreateInfo{
+			.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+			.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+		};
+		chk(vmaCreateImage(allocator, &imageInfo, &allocCreateInfo, &binding.image, &binding.imageAllocation, nullptr));
+
+		VkImageViewCreateInfo viewInfo{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = binding.image,
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = format,
+			.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+		};
+		chk(vkCreateImageView(device, &viewInfo, nullptr, &binding.view));
+
+		// Transition UNDEFINED -> GENERAL once, up front (storage images must be GENERAL to be
+		// imageStore'd from a shader; no data to upload, so no copy step needed here)
+		VkCommandBufferAllocateInfo oneTimeAllocInfo{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			.commandPool = commandPool,
+			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			.commandBufferCount = 1
+		};
+		VkCommandBuffer cbOneTime;
+		chk(vkAllocateCommandBuffers(device, &oneTimeAllocInfo, &cbOneTime));
+
+		VkFenceCreateInfo fenceOneTimeCI{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		VkFence fenceOneTime{};
+		chk(vkCreateFence(device, &fenceOneTimeCI, nullptr, &fenceOneTime));
+		beginSingleTimeCommands(cbOneTime, fenceOneTime);
+
+		VkImageMemoryBarrier2 barrier{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+			.srcAccessMask = 0,
+			.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = VK_IMAGE_LAYOUT_GENERAL,
+			.image = binding.image,
+			.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+		};
+		VkDependencyInfo barrierInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &barrier,
+		};
+		vkCmdPipelineBarrier2(cbOneTime, &barrierInfo);
+		endSingleTimeCommands(cbOneTime, fenceOneTime);
+
+		vkDestroyFence(device, fenceOneTime, nullptr);
+		vkFreeCommandBuffers(device, commandPool, 1, &cbOneTime);
+
+		// Step 3: descriptor set layout using reflected binding index (mirrors loadStructuredBuffer)
+		if (firstTime)
+		{
+			setBindings.push_back(
+				VkDescriptorSetLayoutBinding{
+					.binding = bindings[bindingName].binding,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+				}
+				);
+		}
+	}
+
+	void updateImageDescriptors(std::string bindingName)
+	{
+		if (imageBindings.find(bindingName) == imageBindings.end())
+		{
+			std::cout << "Image does not exist for " << bindingName << "\n";
+			return;
+		}
+		if (bindings.find(bindingName) == bindings.end())
+		{
+			std::cout << "Binding does not exist in reflection for " << bindingName << "\n";
+			return;
+		}
+
+		auto& binding = imageBindings[bindingName];
+		VkDescriptorImageInfo descImgInfo{
+			.imageView = binding.view,
+			.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+		};
+		for (auto i = 0; i < maxFramesInFlight; i++)
+		{
+			VkWriteDescriptorSet write{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = descriptorSets[i],
+				.dstBinding = bindings[bindingName].binding,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+				.pImageInfo = &descImgInfo,
+			};
+			vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+		}
 	}
 
 	template<typename T>
@@ -2900,32 +3142,6 @@ public:
 		};
 	}
 
-	void bindStructuredBufferAs(std::string sourceBufferName, std::string targetBindingName, uint32_t frameInFlightIndex)
-	{
-		if (structuredBufferBindings.find(sourceBufferName) == structuredBufferBindings.end())
-		{
-			std::cout << "No buffer loaded for " << sourceBufferName << "\n";
-			return;
-		}
-		if (bindings.find(targetBindingName) == bindings.end())
-		{
-			std::cout << "Binding does not exist in reflection for " << targetBindingName << "\n";
-			return;
-		}
-
-		auto& source = structuredBufferBindings[sourceBufferName];
-		VkDescriptorBufferInfo descBufInfo{ .buffer = source.buffer, .range = VK_WHOLE_SIZE };
-		VkWriteDescriptorSet write{
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.dstSet = descriptorSets[frameInFlightIndex],
-			.dstBinding = bindings[targetBindingName].binding,
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			.pBufferInfo = &descBufInfo,
-		};
-		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-	}
-
 	bool draw()
 	{
 		// Sync
@@ -2965,7 +3181,6 @@ public:
 		shaderData.camDir = glm::normalize(camera.direction);
 		shaderData.bounceCount = bounces;
 		// TODO: this should be the write counter from the previous run
-		shaderData.readQueueLen = windowSize.x * windowSize.y;
 		const bool firstBounce = bounces == 0;
 		const bool finalBounce = bounces == maxBounces - 1;
 		shaderData.resetRays = firstBounce;
@@ -2983,10 +3198,6 @@ public:
 		int historyWriteIndex = 1 - historyReadIndex;
 		updateHistoryDescriptor();
 		
-		bool evenFrame = (frameIndex % 2 == 0);
-		bindStructuredBufferAs(evenFrame ? "rayQueueA" : "rayQueueB", "readQueue", frameIndex);
-		bindStructuredBufferAs(evenFrame ? "rayQueueB" : "rayQueueA", "writeQueue", frameIndex);
-
 		// Build command buffer
 		auto cb = commandBuffers[frameIndex];
 		chk(vkResetCommandBuffer(cb, 0));
@@ -2997,34 +3208,96 @@ public:
 		chk(vkBeginCommandBuffer(cb, &cbBI));
 
 		// compute pipeline
+		uint32_t writeCounterIndex = (uploadedShaderData.bounceCount % 2 == 0) ? 1 : 0;
+		VkDeviceSize offset = writeCounterIndex * sizeof(uint32_t);
+		vkCmdFillBuffer(cb, countersBuffer, offset, sizeof(uint32_t), 0);
 
-
-		// Below is the graphics pipeline
-
-		// shader data
-		VkBufferMemoryBarrier2 shaderDataBarrier{
+		// Make the fill visible to compute.
+		VkBufferMemoryBarrier2 counterClearBarrier{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-			.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
-			.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT,
-
-			.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-							VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-							VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-
-			.buffer = shaderDataBuffers[frameIndex].buffer,
-			.offset = 0,
-			.size = sizeof(ShaderData)
+			.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT |
+							 VK_ACCESS_2_SHADER_WRITE_BIT,
+			.buffer = countersBuffer,
+			.offset = offset,
+			.size = sizeof(uint32_t)
 		};
 
-		VkDependencyInfo shaderDataDependency{
+		VkDependencyInfo counterClearDependency{
 			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 			.bufferMemoryBarrierCount = 1,
-			.pBufferMemoryBarriers = &shaderDataBarrier
+			.pBufferMemoryBarriers = &counterClearBarrier
 		};
 
-		vkCmdPipelineBarrier2(cb, &shaderDataDependency);
+		vkCmdPipelineBarrier2(cb, &counterClearDependency);
 
+		// Bind compute pipeline.
+		vkCmdBindPipeline(
+			cb,
+			VK_PIPELINE_BIND_POINT_COMPUTE,
+			computePipeline
+		);
+
+		// Same descriptor set containing rayQueueA, rayQueueB, counters, etc.
+		vkCmdBindDescriptorSets(
+			cb,
+			VK_PIPELINE_BIND_POINT_COMPUTE,
+			pipelineLayout,
+			0,
+			1,
+			&descriptorSets[frameIndex],
+			0,
+			nullptr
+		);
+		
+		// Later it will make sense to have the graphics pipeline and compute pipelines have different push constants
+		// but for now they are the same
+		vkCmdPushConstants(
+			cb,
+			pipelineLayout,
+			VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+			0,
+			sizeof(ShaderData),
+			&uploadedShaderData
+		);
+		
+		int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
+		uint32_t workgroupSize = 64;
+		uint32_t dispatches = (maxRaysPerQueue + workgroupSize - 1) / workgroupSize;
+
+		// [numthreads(64,1,1)] => one invocation per workgroup.
+		vkCmdDispatch(
+			cb,
+			dispatches,
+			1,
+			1
+		);
+		
+		// barrier for currentFrameImage since it is read by frag shader
+		// TODO later: look if there is a way to avoid this
+		VkImageMemoryBarrier2 currentFrameRGBBarrier{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+			.newLayout = VK_IMAGE_LAYOUT_GENERAL, // no transition, just a visibility barrier
+			.image = imageBindings["currentFrameRGB"].image,
+			.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+		};
+
+		VkDependencyInfo currentFrameRGBDependency{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &currentFrameRGBBarrier
+		};
+
+		vkCmdPipelineBarrier2(cb, &currentFrameRGBDependency);
+
+		// Below is the graphics pipeline
 
 		// swapchain image
 		VkImageMemoryBarrier2 frameImageToAttachment{
@@ -3148,7 +3421,7 @@ public:
 				.height = static_cast<uint32_t>(windowSize.y) 
 			}
 		};
-		vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+		vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 		vkCmdSetScissor(cb, 0, 1, &scissor);
 		vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nullptr);
 		VkDeviceSize vOffset{ 0 };
@@ -3157,7 +3430,7 @@ public:
 		vkCmdPushConstants(
 			cb, 
 			pipelineLayout, 
-			VK_SHADER_STAGE_FRAGMENT_BIT, 
+			VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
 			0, 
 			sizeof(ShaderData),
 			&uploadedShaderData

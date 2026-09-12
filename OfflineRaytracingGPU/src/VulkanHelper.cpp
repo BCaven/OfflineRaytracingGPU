@@ -180,7 +180,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
-			Material{ pastel_orange, 1},					// 0
+			Material{ pastel_orange, 1, 0, light_white},					// 0
 			Material{ pastel_green, -1.5, 50 },				// 1
 			Material{ pastel_blue, 0.5 },					// 2
 			Material{ pastel_purple, 0, 0, light_white},	// 3
@@ -368,7 +368,7 @@ PackedRef prism_demo(VK_Wrap& wrapper)
 	glm::vec4 green = glm::vec4(0, 1, 0, 1);
 	glm::vec4 white = glm::vec4(1);
 
-	glm::vec4 light_white = glm::vec4(10);
+	glm::vec4 light_white = glm::vec4(0, 0, 10, 1);
 	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
 	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
@@ -429,7 +429,7 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 
 	PackedRef root = 0;
-	int choice = 8;
+	int choice = 5;
 
 	if (argc > 2)
 	{

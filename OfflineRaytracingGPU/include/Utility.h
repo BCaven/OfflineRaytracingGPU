@@ -60,6 +60,7 @@ struct Ray
 	float scatter;
 	float emission;
 	float wavelength;
+	glm::uvec2 index; // screen space uv index
 };
 
 using PackedRef = unsigned int;
@@ -198,8 +199,8 @@ struct ShaderData
 	unsigned int resetRays;
 	glm::vec3 camDir;
 	int bounceCount;
-	int readQueueLen;
 };
+
 struct ShaderDataBuffer 
 {
 	VmaAllocation allocation{ VK_NULL_HANDLE };
@@ -235,6 +236,15 @@ struct StructuredBufferBinding
 	VmaAllocation stagingAllocation;
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorPool descriptorPool;
+};
+
+struct ImageBinding
+{
+	VkImage image;
+	VmaAllocation imageAllocation;
+	VkImageView view;
+	VkFormat format;
+	VkExtent2D extent;
 };
 
 

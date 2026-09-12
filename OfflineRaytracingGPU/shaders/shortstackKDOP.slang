@@ -177,7 +177,7 @@ void resolveCandidate(
     outTransformIdx = parentTransformIdx;
 }
 
-Intersection intersect_scene_short_stack(int rayIndex, uint rootIndex, PrimType rootType)
+Intersection intersect_scene_short_stack(Ray startRay, uint rootIndex, PrimType rootType)
 {
     bool exit = false;
     uint iterations = 0;
@@ -199,7 +199,7 @@ Intersection intersect_scene_short_stack(int rayIndex, uint rootIndex, PrimType 
     float currentTEntry = 0.f;
     uint currentTransformIndex = 0;
 
-    Ray currentRay = rays[rayIndex];
+    Ray currentRay = startRay;
 
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;

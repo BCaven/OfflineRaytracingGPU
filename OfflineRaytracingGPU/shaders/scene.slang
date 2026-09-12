@@ -46,7 +46,7 @@ float3 spectral_sample_to_RGB(float value, float lambda, float lambda_pdf)
     return (value / lambda_pdf) * xyz_response / CIE_Y_INTEGRAL;
 }
 
-public float4 ray_spectral(Ray ray, uint sceneRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor)
+public float4 ray_spectral(Ray ray, uint sceneRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor, int frameIndex)
 {
     uint rootIndex = unpackIndex(sceneRoot);
     PrimType rootType = unpackType(sceneRoot);
@@ -67,7 +67,7 @@ public float4 ray_spectral(Ray ray, uint sceneRoot, float3 camDir, bool firstBou
     }
     Material material = materials[intersection.materialIndex];
 
-    float2 spectral = scatter_spectral(ray, intersection, material, camDir);
+    float2 spectral = scatter_spectral(ray, intersection, material, camDir, frameIndex);
 
 
     // write spectral to currentFrameSpectral
