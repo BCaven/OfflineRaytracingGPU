@@ -1,10 +1,11 @@
 implementing scene;
 
-struct tbvhNode
+public struct tbvhNode
 {
     float3 min;
     float3 max;
-    uint packedLeft;
-    uint packedRight;
+    uint packedChild;
     uint packedMiss;
+    int missTransform;
+    int hitTransform;
 }

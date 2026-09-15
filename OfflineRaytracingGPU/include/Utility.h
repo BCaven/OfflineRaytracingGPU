@@ -166,7 +166,6 @@ struct SphericalHarmonic
 
 struct Transform
 {
-	glm::mat4 matrix;
 	glm::mat4 invMatrix;
 	PrimType childPrim;
 	int childIndex;

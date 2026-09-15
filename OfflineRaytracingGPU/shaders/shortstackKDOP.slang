@@ -306,7 +306,15 @@ Intersection intersect_scene_short_stack(Ray startRay, uint rootIndex, PrimType 
         else
         {
             TransformStackNode chain = transformStack[currentTransformIndex];
-            ProcessPrimitive(currentType, currentIndex, currentRay, closest, chain);
+            float3x3 normalMatrix = identity3x3();
+
+            for (uint i = 0; i < chain.transformDepth; i++)
+            {
+                float3x3 transformNormal = transpose((float3x3)transforms[chain.transformChain[i]].invMatrix);
+                normalMatrix = mul(normalMatrix, transformNormal);
+            }
+
+            ProcessPrimitive(currentType, currentIndex, currentRay, closest, normalMatrix, chain.tScale);
 
             exit = popTraversal(trail, level, currentSlot, currentTEntry,
                                 transformStackPtr, currentTransformIndex, transformStack,

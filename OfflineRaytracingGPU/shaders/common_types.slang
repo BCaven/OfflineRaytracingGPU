@@ -9,7 +9,7 @@ public static const float GLASS_F0_SCALAR = 0.04;
 public static const int KDOP_WIDTH = 8;
 
 static const uint STACK_SIZE = 64;
-static const uint TRANSFORM_STACK_SIZE = 16;
+static const uint TRANSFORM_STACK_SIZE = 8;
 
 static const uint SHORT_STACK_SIZE = 15;
 static const uint RESTART_TRAIL_SIZE = 512; // this should be the max depth of the bvh
@@ -98,11 +98,11 @@ public struct Triangle
 public struct GaussianSplat // packing shenanigans available here. Probably more important to hit fewer of these
 {
     float3 center;
-    float3x3 rotation; //
+    float3x3 rotation; // TODO: could totally be quaternion instead
     float3 invScale2;
     float alpha;
     uint materialIndex;
-    float3 halfExtent; // CPU only - not needed by collision algorithm
+    float3 halfExtent; // TODO: remove this, CPU only - not needed by collision algorithm
 };
 
 public struct SphericalHarmonic
@@ -119,6 +119,7 @@ public enum PrimType : uint
     TRANSFORM,
     BVH_NODE,
     KDOP_NODE,
+    THREADED_NODE,
     EMPTY
 };
 
@@ -154,7 +155,6 @@ public struct KDopNodeHot
 
 public struct Transform
 {
-    float4x4 matrix;
     float4x4 invMatrix;
     PrimType childPrim;
     int childIndex;

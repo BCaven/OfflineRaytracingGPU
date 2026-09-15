@@ -180,11 +180,11 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
-			Material{ pastel_orange, 1, 0, light_white},					// 0
+			Material{ pastel_orange, 1},					// 0
 			Material{ pastel_green, -1.5, 50 },				// 1
 			Material{ pastel_blue, 0.5 },					// 2
-			Material{ pastel_purple, 0, 0, light_white},	// 3
-			Material{ pastel_purple, 0, 0, light_purple},	// 4
+			Material{ pastel_purple, 0, 0, pastel_blue},	// 3
+			Material{ pastel_purple, 0, 0, red},			// 4
 			Material{ white, -1.8, 20},						// 5
 			Material{ pastel_grey, -1.7, 30 },				// 6
 			Material{ red, 0},								// 7
@@ -212,7 +212,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	{
 		PackedRef p = packChild(PrimType::SPHERE, i);
 		float r = (rand(gen) + 1) / 5;
-		sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, r - 5, 0), glm::vec3(0, 0, 0), glm::vec3(1, r + 0.1, 1), p));
+		sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, r - 4.5, 0), glm::vec3(0, 0, 0), glm::vec3(1, r + 0.5, 1), p));
 	}
 	auto sphereCollection = wrapper.loadCollection(sphereRing);
 	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 10);

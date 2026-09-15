@@ -1569,7 +1569,7 @@ public:
 		glm::vec3 childMin(FLT_MAX);
 		glm::vec3 childMax(-FLT_MAX);
 		getChildMinMax(transform, childMin, childMax);
-		transformAABB(transform.matrix, childMin, childMax, min, max);
+		transformAABB(glm::inverse(transform.invMatrix), childMin, childMax, min, max);
 	}
 
 	void getSceneBounds(glm::vec3& sceneMin, glm::vec3& sceneMax)
@@ -2282,7 +2282,6 @@ public:
 
 		glm::mat4 transformMatrix = transMat * rotMat * scaleMat;
 		Transform transform{
-			.matrix = transformMatrix,
 			.invMatrix = glm::inverse(transformMatrix),
 			.childPrim = childPrim,
 			.childIndex = childIndex

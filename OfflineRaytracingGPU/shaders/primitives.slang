@@ -64,6 +64,37 @@ void pushRayQueue(Ray ray, int frameIndex)
     }
 }
 
+float3x3 inverse3x3(float3x3 R)
+{
+    float3 r0 = R[0], r1 = R[1], r2 = R[2];
+
+    float3 c0 = cross(r1, r2);
+    float3 c1 = cross(r2, r0);
+    float3 c2 = cross(r0, r1);
+
+    float det = dot(r0, c0);
+    float invDet = 1.0 / det;
+
+    // c0,c1,c2 are the *columns* of R^-1; the float3x3(...) ctor
+    // fills rows, so build then transpose to get columns right.
+    return transpose(float3x3(c0, c1, c2)) * invDet;
+}
+
+float4x4 inverseAffine(float4x4 M)
+{
+    float3x3 R = (float3x3)M;
+    float3 t = float3(M[0][3], M[1][3], M[2][3]);
+
+    float3x3 invR = inverse3x3(R);
+    float3 invT = -mul(invR, t);
+
+    return float4x4(
+        invR[0].x, invR[0].y, invR[0].z, invT.x,
+        invR[1].x, invR[1].y, invR[1].z, invT.y,
+        invR[2].x, invR[2].y, invR[2].z, invT.z,
+        0, 0, 0, 1);
+}
+
 PrimType unpackType(uint packed)
 {
     return PrimType(packed >> 28);
@@ -138,6 +169,16 @@ float3x3 identity3x3()
         float3(1, 0, 0),
         float3(0, 1, 0),
         float3(0, 0, 1)
+    );
+}
+
+float4x4 identity4x4()
+{
+    return float4x4(
+        float4(1, 0, 0, 0),
+        float4(0, 1, 0, 0),
+        float4(0, 0, 1, 0),
+        float4(0, 0, 0, 1)
     );
 }
 
@@ -602,7 +643,9 @@ void ProcessPrimitive(
     int index,
     Ray ray,
     inout Intersection closest,
-    TransformStackNode transformNode)
+    float3x3 transformMat,
+    float tScale,
+    )
 {
     Intersection hit = no_intersection();
 
@@ -620,25 +663,16 @@ void ProcessPrimitive(
         hit = intersect_triangle(ray, triangles[index]);
         break;
     case PrimType::GAUSSIAN_SPLAT:
-        hit = intersect_splat(ray, splats[index], closest.t / transformNode.tScale);
+        hit = intersect_splat(ray, splats[index], closest.t / tScale);
         break;
     default:
         return;
     }
-    if (hit.t > 0 && hit.t * transformNode.tScale < closest.t)
+    if (hit.t > 0 && hit.t * tScale < closest.t)
     {
-        // TODO: rebuild the normal transformation matrix
-        float3x3 normalMatrix = identity3x3();
-
-        for (uint i = 0; i < transformNode.transformDepth; i++)
-        {
-            float3x3 transformNormal = transpose((float3x3)transforms[transformNode.transformChain[i]].invMatrix);
-            normalMatrix = mul(normalMatrix, transformNormal);
-        }
-
-        float3 newNormal = normalize(mul(normalMatrix, hit.normal));
+        float3 newNormal = normalize(mul(transformMat, hit.normal));
         hit.normal = newNormal;
-        hit.t *= transformNode.tScale;
+        hit.t *= tScale;
         closest = hit;
     }
 }

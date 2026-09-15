@@ -107,7 +107,16 @@ void processChild(
         TransformStackNode currentTransform = transformStack[node.transformStackIndex];
         intersectionRay.direction = currentTransform.rayDirection;
         intersectionRay.origin = currentTransform.rayOrigin;
-        ProcessPrimitive(childType, childIndex, intersectionRay, closest, currentTransform);
+
+        float3x3 normalMatrix = identity3x3();
+
+        for (uint i = 0; i < currentTransform.transformDepth; i++)
+        {
+            float3x3 transformNormal = transpose((float3x3)transforms[currentTransform.transformChain[i]].invMatrix);
+            normalMatrix = mul(normalMatrix, transformNormal);
+        }
+
+        ProcessPrimitive(childType, childIndex, intersectionRay, closest, normalMatrix, currentTransform.tScale);
     }
 }
 
