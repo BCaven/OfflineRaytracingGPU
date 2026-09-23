@@ -1957,7 +1957,7 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH(PackedRef root, int transformIndex)
 	int latestTransform = transformIndex;
 
 	// Crawl the tree and convert nodes, it would be nice to have these sorted so nodes in the same trees are close together
-	// todo, need to handle transforms as well
+	// TODO: need to handle transforms as well
 	// I think it would be simplest to have this be recursive
 	if (rootType == PrimType::BVH_NODE)
 	{
@@ -1965,6 +1965,8 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH(PackedRef root, int transformIndex)
 	}
 	else if (rootType == PrimType::KDOP_NODE)
 	{
+		// need to do these to binary nodes
+
 
 	}
 	else if (rootType == PrimType::TRANSFORM)

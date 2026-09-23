@@ -75,6 +75,7 @@ Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with 
 
 # Gallery
 ![spectral scattering](ProjectAssets/IcospherePrism.png)
+![first gif](ProjectAssets/prismDemo.gif)
 ![transforms](ProjectAssets/transformed_spheres.png)
 ![Second image](ProjectAssets/SuzanneWithSpheres.png)
 ![First image](ProjectAssets/FirstImage_Spheres.png)
