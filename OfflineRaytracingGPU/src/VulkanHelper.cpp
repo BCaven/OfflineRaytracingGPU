@@ -185,7 +185,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 			Material{ pastel_blue, 0.5 },					// 2
 			Material{ pastel_purple, 0, 0, pastel_blue},	// 3
 			Material{ pastel_purple, 0, 0, red},			// 4
-			Material{ white, -1.8, 20},						// 5
+			Material{ white, 0, 0, light_white},			// 5
 			Material{ pastel_grey, -1.7, 30 },				// 6
 			Material{ red, 0},								// 7
 			Material{ green, 0},							// 8
@@ -193,25 +193,30 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 			Material{ white, 0},							// 10
 			Material{										// 11
 				.color = white,
-				.metallicOrIor = -1.8,
-				.abbe = 10,
+				.metallicOrIor = -1.5,
+				.abbe = 50,
 			}
 	};
 
-	float radius = 12;
+	float radius = 8.5;
 	float offset = 0; //radius / 2;
+	unsigned int matIndex = 0;
 	for (float r = 0; r < PI * 2; r += PI / 8)
 	{
 		wrapper.spheres.push_back(
-			Sphere{ glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), 1, (unsigned int)rand(gen) }
+			Sphere{ glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), 1, matIndex }
 		);
+
+		matIndex++;
+		matIndex = matIndex % 11;
 	}
 
 	std::vector<PackedRef> sphereRing;
 	for (int i = 0; i < wrapper.spheres.size(); i++)
 	{
 		PackedRef p = packChild(PrimType::SPHERE, i);
-		float r = (rand(gen) + 1) / 5;
+		//float r = (rand(gen) + 1) / 5;
+		float r = 1;
 		sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, r - 4.5, 0), glm::vec3(0, 0, 0), glm::vec3(1, r + 0.5, 1), p));
 	}
 	auto sphereCollection = wrapper.loadCollection(sphereRing);
@@ -220,7 +225,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 8);
 	PackedRef wallIndex_red = wrapper.loadObj("assets/plane.obj", 7);
 
-	PackedRef halfSuzanneIndex = wrapper.loadObj("assets/half_suzanne.obj", 5);
+	PackedRef halfSuzanneIndex = wrapper.loadObj("assets/half_suzanne.obj", 10);
 	PackedRef mirrorSuzanneIndex = wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(-1, 1, 1), halfSuzanneIndex);
 
 	PackedRef suzanneIndex = wrapper.loadCollection({ halfSuzanneIndex, mirrorSuzanneIndex });
@@ -231,7 +236,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, beholderIndex);
 	//PackedRef readingroomIndex = wrapper.loadSplat("assets/readingroom_20x_180.ply");
 
-	PackedRef tomatoIndex = wrapper.loadSplat2("assets/tomatoes_10x_180.ply");
+	//PackedRef tomatoIndex = wrapper.loadSplat2("assets/tomatoes_10x_180.ply");
 
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, -1, 1), suzanneIndex);
 	//wrapper.loadTransform(glm::vec3(0, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1), icosphereIndex);
@@ -250,22 +255,22 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	radius = 4;
 	std::vector<PackedRef> suzanneRings;
-	for (float ring = 1; ring < 4; ring++) for (float r = 0; r < PI * 2; r += PI / (3 * ring))
+	for (float ring = 1; ring < 2; ring++) for (float r = 0; r < PI * 2; r += PI / (3 * ring))
 	{
-		suzanneRings.push_back(wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * (ring * radius)), 15, offset + (std::cos(r) * (ring * radius))), glm::vec3(0, 0, 0), glm::vec3(1), suzanneIndex));
+		suzanneRings.push_back(wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * (ring * radius)), -4, offset + (std::cos(r) * (ring * radius))), glm::vec3(0, PI / 2, 0), glm::vec3(1), suzanneIndex));
 	}
 	auto suzanneCollection = wrapper.loadCollection(suzanneRings);
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), readingroomIndex);	
-	auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(1), tomatoIndex);
+	//auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(2), tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 	PackedRef prism = wrapper.loadObj("assets/icosphere2.obj", 11);
 	Collection prisms;
-	radius = 7;
+	radius = 6;
 	for (float r = 0; r < PI * 2; r += PI / 8)
 	{
 		prisms.push_back(
-			wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), glm::vec3(0, rand(gen) / PI, 0), glm::vec3(1), prism)
+			wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * radius), -4, offset + (std::cos(r) * radius)), glm::vec3(0, wrapper.time / PI, 0), glm::vec3(1), prism)
 		);
 	}
 	auto prismCollection = wrapper.loadCollection(prisms);
@@ -278,7 +283,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection, splatCollection, suzanneCollection });
+	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection, /*splatCollection,*/ suzanneCollection});
 }
 
 PackedRef flat_BLAS_TLAS(VK_Wrap& wrapper)
@@ -422,15 +427,11 @@ PackedRef prism_demo(VK_Wrap& wrapper)
 	return wrapper.loadCollection({ cornellBox, prismInstance, lightInstance, leftLightWall, rightLightWall });
 }
 
-int main(int argc, char* argv[])
+PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)
 {
-	std::cout << "Hello World!\n";
-
-	VK_Wrap wrapper;
-
+	auto oldCam = wrapper.camera;
 	PackedRef root = 0;
-	int choice = 5;
-
+	// build the scene
 	if (argc > 2)
 	{
 		int choice = std::atoi(argv[1]);
@@ -468,19 +469,61 @@ int main(int argc, char* argv[])
 		root = suzannes_row_instancesNxN(wrapper, 100);
 		break;
 	}
-	
+	if (!resetCamera)
+	{
+		wrapper.camera = oldCam;
+	}
+	return root;
+}
+
+int main(int argc, char* argv[])
+{
+	std::cout << "Hello World!\n";
+
+	VK_Wrap wrapper;
+
+	wrapper.numFramesPerFile = 2000;
+	wrapper.numImagesPerSequence = 16;
+	wrapper.time_delta = PI / 8;
+	int choice = 5;
+
+	PackedRef root = pickRoot(wrapper, choice, argc, argv);
+	wrapper.shaderData.sceneRoot = root;
 
 	wrapper.init();
-	wrapper.shaderData.sceneRoot = root;
 	bool running = true;
+	float prevT = wrapper.time;
+	wrapper.savePath = "renderedFrames/prismDemo" + std::to_string(wrapper.time) + ".exr";
+
 	while (running)
 	{
 		
+		wrapper.getFences();
+		if (prevT != wrapper.time)
+		{
+			std::cout << "previous root: " << root << "\n";
+
+			std::cout << "Building scene\n";
+			// reset nodes
+			wrapper.clearPrimitives();
+
+			wrapper.savePath = "renderedFrames/prismDemo" + std::to_string(wrapper.time) + ".exr";
+
+			root = pickRoot(wrapper, choice, argc, argv, false);
+
+			wrapper.reloadPrimitives();
+
+			std::cout << "new root: " << root << "\n";
+			wrapper.shaderData.sceneRoot = root;
+
+		}
+		prevT = wrapper.time;
+
 		if (wrapper.draw())
 		{
 			running = false;
 		}
-		
+
 	}
 
 	return 0;

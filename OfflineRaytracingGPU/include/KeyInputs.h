@@ -52,6 +52,12 @@ public:
 	static inline std::atomic<bool> UP = false;
 	static inline std::atomic<bool> DOWN = false;
 
+	static inline std::atomic<bool> WRITE_IMAGE = false;
+
+	static inline std::atomic<bool> NEXT_TIME = false;
+	static inline std::atomic<bool> PREV_TIME = false;
+
+
 	static inline std::atomic<float> MOUSE_X = 0.0;
 	static inline std::atomic<float> MOUSE_Y = 0.0;
 	static inline std::atomic<float> MOUSE_DELTA_X = 0.0;

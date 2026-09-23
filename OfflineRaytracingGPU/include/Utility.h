@@ -74,7 +74,24 @@ enum PrimType : unsigned int
 	TRANSFORM,
 	BVH_NODE,
 	KDOP_NODE,
+	THREADED_NODE,
 	EMPTY
+};
+
+struct tbvhNode
+{
+	glm::vec3 min;
+	glm::vec3 max;
+	PackedRef packedChild;
+	PackedRef packedMiss;
+	int missTransform;
+	int hitTransform;
+};
+
+struct ThreadedWrapper
+{
+	PackedRef retNode;
+	int transformIndex;
 };
 
 struct bvhChild
@@ -247,7 +264,6 @@ struct ImageBinding
 };
 
 
-
 static inline void chk(VkResult result) 
 {
 	if (result != VK_SUCCESS) {
@@ -313,7 +329,7 @@ static inline glm::vec3 make_aabb_min(glm::vec3 p1, glm::vec3 p2)
 	);
 }
 
-K14Dop makeEmptyKDop()
+static inline K14Dop makeEmptyKDop()
 {
 	K14Dop kdop;
 	for (int i = 0; i < KDOP_AXIS_COUNT; ++i)
@@ -324,7 +340,7 @@ K14Dop makeEmptyKDop()
 	return kdop;
 }
 
-K14Dop mergeKDop(const K14Dop& a, const K14Dop& b)
+static inline K14Dop mergeKDop(const K14Dop& a, const K14Dop& b)
 {
 	K14Dop result;
 
@@ -495,11 +511,11 @@ static inline PackedRef packChild(PrimType type, int index)
 	return (unsigned int(type) << 28) | (unsigned int(index) & 0x0FFFFFFFu);
 }
 
-int unpackIndex(unsigned int packed)
+static inline int unpackIndex(unsigned int packed)
 {
 	return int(packed & 0x0FFFFFFFu);
 }
-PrimType unpackType(unsigned int packed)
+static inline PrimType unpackType(unsigned int packed)
 {
 	return PrimType(packed >> 28);
 }

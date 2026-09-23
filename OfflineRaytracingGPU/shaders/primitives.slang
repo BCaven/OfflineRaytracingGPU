@@ -638,7 +638,7 @@ uint sortChildrenByDistance(uint validMask, float tHit[KDOP_WIDTH], out uint sor
     return count;
 }
 
-void ProcessPrimitive(
+bool ProcessPrimitive(
     PrimType type,
     int index,
     Ray ray,
@@ -652,7 +652,7 @@ void ProcessPrimitive(
     // this check should be unnecessary
     if (index < 0)
     {
-        return;
+        return false;
     }
     switch (type)
     {
@@ -666,7 +666,7 @@ void ProcessPrimitive(
         hit = intersect_splat(ray, splats[index], closest.t / tScale);
         break;
     default:
-        return;
+        return false;
     }
     if (hit.t > 0 && hit.t * tScale < closest.t)
     {
@@ -674,5 +674,7 @@ void ProcessPrimitive(
         hit.normal = newNormal;
         hit.t *= tScale;
         closest = hit;
+        return true;
     }
+    return false;
 }

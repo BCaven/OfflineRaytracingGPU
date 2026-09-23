@@ -1,0 +1,3 @@
+[submodule "OfflineRaytracingGPU/external/external/tinyexr"]
+	path = OfflineRaytracingGPU/external/external/tinyexr
+	url = https://github.com/syoyo/tinyexr

@@ -58,15 +58,14 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
     Ray currentRay = startRay;
     float4x4 currentTransform = identity4x4();
     float scaleT = 1;
+    uint lastPackedMiss = -1;
     // otherwise traverse the threaded nodes
     bool quit = index >= threadLen;
-    while (!quit)
+    while (index < threadLen)
     {
         if (nodeType != PrimType::THREADED_NODE)
         {
-            // process collision and exit
-            float3x3 normalMat = transpose((float3x3)currentTransform);
-            ProcessPrimitive(nodeType, index, currentRay, closest, normalMat, scaleT);
+            // somehow we pursued a non-threaded node
             return closest;
         }
 
@@ -76,8 +75,10 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
 
         tbvhNode current = threadedNodes[index];
         float hit = scaleT * intersect_aabb(currentRay, current.min, current.max);
+        bool bHit = false;
         if (hit < closest.t) // hit and closest
         {
+            bHit = true;
             if (current.hitTransform >= 0)
             {
                 // load the hit transform and apply it
@@ -87,8 +88,18 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
             // update current index/type and continue
             index = unpackIndex(current.packedChild);
             nodeType = unpackType(current.packedChild);
+            lastPackedMiss = current.packedMiss;
+
+            // it might be easier to just check for primitives here
+            if (nodeType != PrimType::THREADED_NODE)
+            {
+                // process collision and exit
+                float3x3 normalMat = transpose((float3x3)currentTransform);
+                bHit = ProcessPrimitive(nodeType, index, currentRay, closest, normalMat, scaleT);
+            }
+
         }
-        else // hit and not closest or missed
+        if (!bHit) // hit and not closest or missed
         {
             // modify current ray if needed and go to miss node
             if (current.missTransform >= 0)

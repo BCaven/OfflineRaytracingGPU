@@ -26,6 +26,10 @@ endif()
 find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
+if (NOT EXISTS ${CMAKE_SOURCE_DIR}/external/tinyexr/tinyexr.h)
+    message(FATAL_ERROR "tinyexr missing: run `git submodule update --init --recursive`")
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
 
 add_subdirectory(external/ktx)

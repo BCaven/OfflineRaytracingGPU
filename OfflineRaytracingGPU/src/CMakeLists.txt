@@ -1,12 +1,19 @@
+set(TINYEXR_DIR ${CMAKE_SOURCE_DIR}/external/tinyexr)
+
 add_executable(${NAME}
     VulkanHelper.cpp
     EngineObject.cpp
     KeyInputs.cpp
+    VulkanWrapper.cpp
+    ImageReadback.cpp
+    ${TINYEXR_DIR}/deps/miniz/miniz.c
     ${CMAKE_SOURCE_DIR}/shaders/shader.slang)
 
 target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/tinyobj
+    ${TINYEXR_DIR}
+    ${TINYEXR_DIR}/deps/miniz
     SYSTEM $ENV{VULKAN_SDK}/include)
 
 target_compile_definitions(${NAME} PRIVATE VK_NO_PROTOTYPES)

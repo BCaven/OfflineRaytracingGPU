@@ -22,6 +22,10 @@ void KeyInputs::handleKeyInputs()
 	UP = keyboardState[SDL_SCANCODE_E];
 	DOWN = keyboardState[SDL_SCANCODE_Q];
 
+	WRITE_IMAGE = keyboardState[SDL_SCANCODE_R];
+	NEXT_TIME = keyboardState[SDL_SCANCODE_RIGHT];
+	PREV_TIME = keyboardState[SDL_SCANCODE_LEFT];
+
 	QUIT = (QUIT || keyboardState[SDL_SCANCODE_ESCAPE]);
 
 	SDL_Event e;
