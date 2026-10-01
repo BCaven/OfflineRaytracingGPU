@@ -19,6 +19,8 @@ Progressive Spectral Monte Carlo GPU path tracer written in Slang and C++ using 
 - Mixed node types (transform, primitive, binary AABB, 8-wide KDOP)
 - Nested instances
 - Spectral sampling
+- Compute shader pipeline
+- Animations with variable time step
 
 # Implementation details
 
@@ -56,6 +58,15 @@ For example: a N by N by N cube of Suzannes would contain N^3 Suzanne instances 
 This lowers the memory footprint and build time for scenes with repeated groups of instances, \
 allowing for much larger scenes in the same memory footprint and build-time constraints.
 
+### Self referencing instances
+
+Arbitrary nested instances also allow for procedurally generated and rendered recursive collections that are traversed and rendered as visible to the camera. \
+This means fractal structures are supported by storing a single branch, and other recursive trees. This is only partially supported by stack based dfs, \
+with further support planned using a stackless traversal algorithm.
+
+Below is inital testing using a collection containing Suzanne and a reference to the collection that has been rotated and scaled, creating a spiral pattern.
+![initial testing using self references](ProjectAssets/first_fractal.png)
+
 ## Gaussian Splat primitives
 
 The PLY loader is adapted from [3D Gaussian Splatting in a Weekend](https://bfeldman.me/3dgs-weekend/).
@@ -66,6 +77,15 @@ By averaging samples across many rays, the path tracer simulates alpha blending 
 
 Read more about this type of gaussian splat ray tracing here: [Stochastic Ray Tracing of Transparent 3D Gaussians](https://arxiv.org/pdf/2504.06598)
 
+## Time and animations
+
+Animations are supported by accessing `wrapper.time` during scene construction. \
+Manual time steps are supported as well as automated rendering of animation sequences. Timesteps (`wraper.time_delta`) can also be changed during an animation sequence, allowing for easy interpolation and modification of time in the animation. \
+This results in effects such as: \
+- real-time to slow motion
+- reversing time mid animation
+- fast forward
+
 # References:
 
 Sun, Xin, et al. "Stochastic Ray Tracing of Transparent 3D Gaussians." arXiv preprint arXiv:2504.06598 (2025). \
@@ -75,10 +95,10 @@ Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with 
 
 # Gallery
 ![spectral scattering](ProjectAssets/IcospherePrism.png)
-![first gif](ProjectAssets/prismDemo.gif)
+![first gif](ProjectAssets/prism_3.gif)
 ![transforms](ProjectAssets/transformed_spheres.png)
 ![Second image](ProjectAssets/SuzanneWithSpheres.png)
 ![First image](ProjectAssets/FirstImage_Spheres.png)
 
-8 billion instances of Suzanne:
-![8b Suzanne](ProjectAssets/8b_suzannes.png)
+8 billion instances of Suzanne illuminated by sphere mesh lights:
+![8b Suzanne](ProjectAssets/8b_suzannes_with_lights.png)

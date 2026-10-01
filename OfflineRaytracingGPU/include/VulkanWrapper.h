@@ -349,6 +349,8 @@ public:
 
 	PackedRef loadSplat2(std::string filepath);
 
+	void updateTransform(PackedRef transformRef, PackedRef newChild);
+
 	void validateBVHNode(PackedRef childRef, std::unordered_set<int>& visiting, std::unordered_set<int>& visited);
 
 	void validateBVH(PackedRef rootRef, int depth_to_display);

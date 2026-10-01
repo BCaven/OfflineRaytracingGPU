@@ -1989,6 +1989,76 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 	std::vector<LeafItem> leavesAABB;
 	std::vector<KDopLeaf> leavesKdop;
 
+	// get scene bounds for recursive transform
+	// TODO: this is still buggy (might just be a transform stack overflow though)
+	glm::vec3 sceneMin(FLT_MAX);
+	glm::vec3 sceneMax(-FLT_MAX);
+
+
+	for (const auto& ref : references)
+	{
+		PrimType t = unpackType(ref);
+		int index = unpackIndex(ref);
+		glm::vec3 min(FLT_MAX);
+		glm::vec3 max(-FLT_MAX);
+		switch (t)
+		{
+		case BVH_NODE:
+			//std::cout << "Adding a bvh node\n";
+			min = make_aabb_min(bvhNodes[index].left.min, bvhNodes[index].right.min);
+			max = make_aabb_max(bvhNodes[index].left.max, bvhNodes[index].right.max);
+			break;
+		case KDOP_NODE:
+			//std::cout << "Adding a kdop node\n";
+
+			for (int i = 0; i < KDOP_WIDTH; i++)
+			{
+				min = make_aabb_min(min, kdopHotNodes[index].min_packed[i]);
+				max = make_aabb_max(max, kdopHotNodes[index].max[i]);
+			}
+			break;
+		case TRIANGLE:
+			//std::cout << "Adding a triangle node\n";
+
+			max = make_aabb_max(make_aabb_max(triangles[index].v0, triangles[index].v1), triangles[index].v2);
+			min = make_aabb_min(make_aabb_min(triangles[index].v0, triangles[index].v1), triangles[index].v2);
+
+			max += KDOP_EPSILON;
+			min -= KDOP_EPSILON;
+			break;
+		case SPHERE:
+			//std::cout << "Adding a sphere node\n";
+
+			min = spheres[index].center - spheres[index].radius;
+			max = spheres[index].center + spheres[index].radius;
+			break;
+		case GAUSSIAN_SPLAT:
+			//std::cout << "Adding a gs node\n";
+
+			min = splats[index].center - splats[index].halfExtent;
+			max = splats[index].center + splats[index].halfExtent;
+			break;
+		case TRANSFORM:
+			//std::cout << "Adding a transform node\n";
+			if (transforms[index].childPrim != EMPTY)
+			{
+				getTransformMinMax(transforms[index], min, max);
+			}
+			else
+			{
+				min = sceneMin;
+				max = sceneMax;
+			}
+			break;
+		default:
+			//std::cout << "Oops something else\n";
+			throw std::runtime_error("Not a supported type: " + t);
+			break;
+		}
+		sceneMax = make_aabb_max(sceneMax, max);
+		sceneMin = make_aabb_min(sceneMin, min);
+	}
+
 	for (const auto& ref : references)
 	{
 		/*
@@ -2048,10 +2118,21 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 			dop = kdopFromGaussianSplat(splats[index].center, splats[index].rotation, 1.f / glm::sqrt(splats[index].invScale2), 0.01);
 			break;
 		case TRANSFORM:
-			//std::cout << "Adding a transform node\n";
+			///std::cout << "Adding a transform node\n";
 
-			getTransformMinMax(transforms[index], min, max);
+			// empty child = this is a recursive transform that will later be filled with the root of this bvh
+			if (transforms[index].childPrim == PrimType::EMPTY)
+			{
+				transformAABB(glm::inverse(transforms[index].invMatrix), sceneMin, sceneMax, min, max);
+			}
+			else
+			{
+				getTransformMinMax(transforms[index], min, max);
+			}
 			dop = kdopFromAABB(min, max);
+			//std::cout << "Min: < " << min.x << ", " << min.y << ", " << min.z << ">\n";
+			//std::cout << "Max: < " << max.x << ", " << max.y << ", " << max.z << ">\n";
+
 			break;
 		default:
 			//std::cout << "Oops something else\n";
@@ -2707,6 +2788,28 @@ PackedRef VK_Wrap::loadSplat2(std::string filepath)
 	return packChild(KDOP_NODE, flattenKDop(binaryKdop));
 }
 
+void VK_Wrap::updateTransform(PackedRef transformRef, PackedRef newChild)
+{
+	
+	int index = unpackIndex(transformRef);
+	PrimType t = unpackType(transformRef);
+
+	if (t != PrimType::TRANSFORM)
+	{
+		std::cout << "Oops, tried to modify something that was not a transform!";
+		return;
+	}
+	if (transforms[index].childPrim != PrimType::EMPTY)
+	{
+		std::cout << "Warning, it is assumed that newChild is the root of a tree that contains the updated transform. This function should only be used to fill recursive transform nodes that are currently EMPTY\n";
+		return;
+	}
+	int childIndex = unpackIndex(newChild);
+	PrimType childT = unpackType(newChild);
+	transforms[index].childIndex = childIndex;
+	transforms[index].childPrim = childT;
+}
+
 void VK_Wrap::validateBVHNode(PackedRef childRef, std::unordered_set<int>& visiting, std::unordered_set<int>& visited)
 {
 	if (unpackType(childRef) != BVH_NODE)
@@ -3331,7 +3434,7 @@ bool VK_Wrap::draw()
 			readbackFrame = int(frameIndex);
 			saveRequested = false;
 		}
-		else
+		else if (shaderData.frameCount % 100 == 0)
 		{
 			std::cout << "Frame " << shaderData.frameCount + 1 << " of " << numFramesPerFile << "\n";
 		}

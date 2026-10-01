@@ -126,10 +126,58 @@ PackedRef suzannes_row_instancesNxNxN(VK_Wrap& wrapper, int n)
 
 PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 {
+
+	std::string prefix = "renderedFrames/suzanneCube_";
+	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
+
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<> rand(-1000, 1000);
+
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
+	glm::vec4 pastel_green = glm::vec4(143, 237, 82, 255) / 255.0f;
+	glm::vec4 pastel_blue = glm::vec4(83, 236, 228, 255) / 255.0f;
+	glm::vec4 pastel_purple = glm::vec4(181, 150, 243, 255) / 255.0f;
+	glm::vec4 pastel_grey = glm::vec4(139, 157, 180, 255) / 255.f;
+	glm::vec4 red = glm::vec4(1, 0, 0, 1);
+	glm::vec4 green = glm::vec4(0, 1, 0, 1);
+	glm::vec4 white = glm::vec4(1);
+
+	glm::vec4 light_white = glm::vec4(10);
+	glm::vec4 light_purple = 5.f * (glm::vec4(128, 0, 255, 255) / 255.f);
+	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
+
 	wrapper.materials = std::vector<Material>{
-			Material{ pastel_orange, 0},				// 00
+		Material{ pastel_orange, 0},				// 0
+		Material{ pastel_blue, 0.5, 0, pastel_blue * 10.f },				// 2
+		Material{ pastel_purple, 0, 0, pastel_purple * 10.f},	// 3
+		Material{ pastel_green, -1.8, 25, pastel_green * 10.f},				// 1
+		Material{ green, 0, 0, green * 10.f},						// 8
+		Material{ pastel_purple, 0, 0, light_purple},	// 4
+		Material{ pastel_orange, 0, 0, pastel_orange * 10.f},				// 5
+		Material{ pastel_grey, 0, 0, light_white },					// 6
+		Material{ red, 0, 0, red * 10.f},							// 7
+		Material{ white, 0, 0, white * 10.f}						// 9
 	};
+	
+	for (unsigned int i = 1; i < wrapper.materials.size(); i++)
+	{
+		wrapper.spheres.push_back(Sphere{
+			.center = glm::vec3(0),
+			.radius = 1,
+			.materialIndex = i
+			});
+	}
+
+	Collection lightSpheres;
+	unsigned int sphereIndex = 0;
+	for (int i = 0; i < 5000; i++)
+	{
+		lightSpheres.push_back(wrapper.loadTransform(glm::vec3(rand(gen), -45, rand(gen)), glm::vec3(0), glm::vec3(1), packChild(SPHERE, sphereIndex)));
+		sphereIndex++;
+		sphereIndex = sphereIndex % (wrapper.spheres.size() - 1);
+	}
+	
 	PackedRef suzanneInstance = wrapper.loadObj("assets/suzanne.obj", 0);
 
 	std::vector<PackedRef> suzanneCube;
@@ -155,7 +203,9 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 				glm::vec3(i, j, k), glm::vec3(0, 0, 0), glm::vec3(1), suzanneCubeInstance));
 
 	}
-	
+	wrapper.shaderData.backgroundColor = sky;
+	wrapper.camera.origin = glm::vec3(0, 100, 0);
+	suzanneCollection.insert(suzanneCollection.end(), lightSpheres.begin(), lightSpheres.end());
 	return wrapper.loadCollection(suzanneCollection);
 }
 
@@ -293,6 +343,10 @@ PackedRef flat_BLAS_TLAS(VK_Wrap& wrapper)
 
 PackedRef large_splat_demo(VK_Wrap& wrapper)
 {
+
+	std::string prefix = "renderedFrames/largesplat_demo_";
+	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
+
 	std::random_device rd;
 	std::mt19937 gen(rd());
 	std::uniform_int_distribution<> rand(0, 10);
@@ -312,37 +366,42 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 1},				// 0
-			Material{ pastel_green, -1.8, 25},				// 1
 			Material{ pastel_blue, 0.5 },				// 2
 			Material{ pastel_purple, 0, 0, light_white},	// 3
+			Material{ pastel_green, -1.8, 25},				// 1
+			Material{ green, 0},						// 8
 			Material{ pastel_purple, 0, 0, light_purple},	// 4
 			Material{ pastel_orange, 0},				// 5
 			Material{ pastel_grey, 0, 0, light_white },					// 6
 			Material{ red, 0},							// 7
-			Material{ green, 0},						// 8
 			Material{ white, 0},						// 9
 			Material{ white, 0, 0, light_white}			// 10
 	}; 
 
 	// TODO: maybe split this into chunks to easy traversal cost
-	PackedRef readingroomIndex = wrapper.loadSplat2("assets/readingroom_1x_180.ply");
+	PackedRef readingroomHalf1 = wrapper.loadSplat2("assets/readingroom_half1.ply");
+	PackedRef readingroomHalf2 = wrapper.loadSplat2("assets/readingroom_half2.ply");
 
 	Collection spheres;
 
 	float radius = 3;
 	float offset = 0; //radius / 2;
-	for (float r = 0; r < PI * 2; r += PI / 8)
+	float rot = wrapper.time;
+	unsigned int matIndex = 0;
+	for (float r = 0 + rot; r < (PI * 2) + rot; r += PI / 8)
 	{
+		matIndex++;
+		matIndex = matIndex % 9;
 		wrapper.spheres.push_back(
-			Sphere{ glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), 0.5, (unsigned int)rand(gen) }
+			Sphere{ glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), 0.5, matIndex }
 		);
 	}
 
 	for (int i = 0; i < wrapper.spheres.size(); i++)
 	{
 		PackedRef p = packChild(PrimType::SPHERE, i);
-		float r = (rand(gen) + 1);
-		spheres.push_back(wrapper.loadTransform(glm::vec3(3, 0, 3), glm::vec3(0, 0, 0), glm::vec3(1, r / 5, 1), p));
+		float r = 1; //(rand(gen) + 1);
+		spheres.push_back(wrapper.loadTransform(glm::vec3(3, 0, 3), glm::vec3(0, 0, 0), glm::vec3(1, r, 1), p));
 	}
 
 	PackedRef spheresPtr = wrapper.loadCollection(spheres);
@@ -354,12 +413,16 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return wrapper.loadCollection({ spheresPtr, readingroomIndex});
+	return wrapper.loadCollection({ spheresPtr, readingroomHalf1, readingroomHalf2});
 
 }
 
 PackedRef prism_demo(VK_Wrap& wrapper)
 {
+	std::string prefix = "renderedFrames/prism_4_";
+	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
+
+
 	std::random_device rd;
 	std::mt19937 gen(rd());
 	std::uniform_real_distribution<float> rand(-10, 10);
@@ -373,7 +436,7 @@ PackedRef prism_demo(VK_Wrap& wrapper)
 	glm::vec4 green = glm::vec4(0, 1, 0, 1);
 	glm::vec4 white = glm::vec4(1);
 
-	glm::vec4 light_white = glm::vec4(0, 0, 10, 1);
+	glm::vec4 light_white = 200.f * glm::vec4(1);
 	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
 	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
@@ -386,13 +449,16 @@ PackedRef prism_demo(VK_Wrap& wrapper)
 				.color = white,
 				.metallicOrIor = -1.8,
 				.abbe = 10,
-			}
+			},
+			Material{ white, 0, 0, sky * 2.f},			// 5
+			Material{ glm::vec4(0), 0}					// 6
 
 	};
 
 	// cornell box
 	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 2);
-	PackedRef wallIndex_ceiling = wrapper.loadObj("assets/plane.obj", 2);
+	PackedRef wallIndex_black = wrapper.loadObj("assets/plane.obj", 6);
+	PackedRef wallIndex_ceiling = wrapper.loadObj("assets/plane.obj", 5);
 	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 1);
 	PackedRef wallIndex_red = wrapper.loadObj("assets/plane.obj", 0);
 	// floor
@@ -400,17 +466,17 @@ PackedRef prism_demo(VK_Wrap& wrapper)
 	// ceiling
 	auto ceiling = wrapper.loadTransform(glm::vec3(0, 25, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_ceiling);
 	// walls
-	auto wall_red = wrapper.loadTransform(glm::vec3(0, 0, 15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_white);
-	auto wall_green = wrapper.loadTransform(glm::vec3(0, 0, -15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_white);
+	auto wall_red = wrapper.loadTransform(glm::vec3(0, 0, 4), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_white);
+	auto wall_green = wrapper.loadTransform(glm::vec3(0, 0, -4), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_white);
 	auto wall_front = wrapper.loadTransform(glm::vec3(15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
-	auto wall_back = wrapper.loadTransform(glm::vec3(-15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto wall_back = wrapper.loadTransform(glm::vec3(-5, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
 	auto cornellBox = wrapper.loadCollection({ floor, ceiling, wall_red, wall_green, wall_front, wall_back });
 
 
 	// prism
 	PackedRef prism = wrapper.loadObj("assets/icosphere2.obj", 4);
 	
-	auto prismInstance = wrapper.loadTransform(glm::vec3(0, -4, 0), glm::vec3(0, 0, 0), glm::vec3(1.5), prism);
+	auto prismInstance = wrapper.loadTransform(glm::vec3(0, -3.5, 0), glm::vec3(0, wrapper.time, 0), glm::vec3(1.5), prism);
 
 
 	wrapper.spheres.push_back(Sphere{
@@ -419,12 +485,196 @@ PackedRef prism_demo(VK_Wrap& wrapper)
 		.materialIndex = 3
 		});
 
-	auto leftLightWall = wrapper.loadTransform(glm::vec3(14, -4, 0.5), glm::vec3(PI / 2, 0, 0), glm::vec3(0.5, 0.1, 0.1), wallIndex_white);
-	auto rightLightWall = wrapper.loadTransform(glm::vec3(14, -4, -0.5), glm::vec3(PI / 2, 0, 0), glm::vec3(0.5, 0.1, 0.1), wallIndex_white);
-	auto topLightWall = wrapper.loadTransform(glm::vec3(14, -3.5, 0), glm::vec3(0), glm::vec3(0.5, 0.1, 0.1), wallIndex_white);
-	auto lightInstance = wrapper.loadTransform(glm::vec3(14, -4, 0), glm::vec3(0, 0, 0), glm::vec3(1), packChild(SPHERE, 0));
+	auto lightTubePrim = wrapper.loadObj("assets/tube.obj", 6);
+	auto lightTube = wrapper.loadTransform(glm::vec3(14, -4, 0), glm::vec3(0, 0, PI/2), glm::vec3(0.51, 13, 0.51), lightTubePrim);
+	float lightBoxWidth = 0.02;
+	float offset = 0.5;
+	auto leftLightWall = wrapper.loadTransform(glm::vec3(14, -5 + offset, 0.5), glm::vec3(PI / 2, 0, 0), glm::vec3(0.5, lightBoxWidth * 3, lightBoxWidth * 3), wallIndex_black);
+	auto rightLightWall = wrapper.loadTransform(glm::vec3(14, -5 + offset, -0.5), glm::vec3(PI / 2, 0, 0), glm::vec3(0.5, lightBoxWidth * 3, lightBoxWidth * 3), wallIndex_black);
+	auto topLightWall = wrapper.loadTransform(glm::vec3(14, -3.5 + offset, 0), glm::vec3(0), glm::vec3(0.5, lightBoxWidth, lightBoxWidth), wallIndex_black);
+	auto bottomLightWall = wrapper.loadTransform(glm::vec3(14, -4.5 + offset, 0), glm::vec3(0), glm::vec3(0.5, lightBoxWidth, lightBoxWidth), wallIndex_black);
+	auto lightInstance = wrapper.loadTransform(glm::vec3(14, -4 + offset, 0), glm::vec3(0, 0, 0), glm::vec3(1), packChild(SPHERE, 0));
 
-	return wrapper.loadCollection({ cornellBox, prismInstance, lightInstance, leftLightWall, rightLightWall });
+	return wrapper.loadCollection({ cornellBox, prismInstance, lightInstance, leftLightWall, rightLightWall, topLightWall});
+}
+
+PackedRef demo_video(VK_Wrap& wrapper)
+{
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<> rand(0, 10);
+
+	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
+	glm::vec4 pastel_green = glm::vec4(143, 237, 82, 255) / 255.0f;
+	glm::vec4 pastel_blue = glm::vec4(83, 236, 228, 255) / 255.0f;
+	glm::vec4 pastel_purple = glm::vec4(181, 150, 243, 255) / 255.0f;
+	glm::vec4 pastel_grey = glm::vec4(139, 157, 180, 255) / 255.f;
+	glm::vec4 red = glm::vec4(1, 0, 0, 1);
+	glm::vec4 green = glm::vec4(0, 1, 0, 1);
+	glm::vec4 white = glm::vec4(1);
+
+	glm::vec4 light_white = glm::vec4(10);
+	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
+	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
+
+	wrapper.materials = std::vector<Material>{
+			Material{ pastel_orange, 1},					// 0
+			Material{ pastel_green, -1.5, 50 },				// 1
+			Material{ pastel_blue, 0.5 },					// 2
+			Material{ pastel_purple, 0},	// 3
+			Material{ pastel_purple, 0},			// 4
+			Material{ white, 0},			// 5
+			Material{ pastel_grey, -1.7, 30 },				// 6
+			Material{ red, 0},								// 7
+			Material{ green, 0},							// 8
+			Material{ white, 0, 0, light_white},			// 9
+			Material{ white, 0},							// 10
+			Material{										// 11
+				.color = white,
+				.metallicOrIor = -1.9,
+				.abbe = 7,
+			}
+	};
+
+	float radius = 8.5;
+	float offset = 0; //radius / 2;
+	unsigned int matIndex = 0;
+	for (float r = 0; r < PI * 2; r += PI / 8)
+	{
+		wrapper.spheres.push_back(
+			Sphere{ glm::vec3(offset + (std::sin(r) * radius), 0, offset + (std::cos(r) * radius)), 1, matIndex }
+		);
+
+		matIndex++;
+		matIndex = matIndex % 8;
+	}
+	wrapper.spheres.push_back(
+		Sphere{ glm::vec3(0, 0, 0), 1, 9}
+	);
+
+	std::vector<PackedRef> sphereRing;
+	for (int i = 0; i < wrapper.spheres.size() - 1; i++)
+	{
+		PackedRef p = packChild(PrimType::SPHERE, i);
+		//float r = (rand(gen) + 1) / 5;
+		float r = 1;
+		sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, r - 3, 0), glm::vec3(0, 0, 0), glm::vec3(1, r + 0.5, 1), p));
+	}
+	sphereRing.push_back(wrapper.loadTransform(glm::vec3(0, -4.5, 0), glm::vec3(0), glm::vec3(0.5), packChild(PrimType::SPHERE, wrapper.spheres.size() - 1)));
+	auto sphereCollection = wrapper.loadCollection(sphereRing);
+	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 10);
+	PackedRef wallIndex_ceiling = wrapper.loadObj("assets/plane.obj", 10);
+	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 8);
+	PackedRef wallIndex_red = wrapper.loadObj("assets/plane.obj", 7);
+	PackedRef halfSuzanneIndex = wrapper.loadObj("assets/half_suzanne.obj", 10);
+	PackedRef mirrorSuzanneIndex = wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(-1, 1, 1), halfSuzanneIndex);
+
+	PackedRef suzanneIndex = wrapper.loadCollection({ halfSuzanneIndex, mirrorSuzanneIndex });
+
+	// floor
+	auto floor = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_white);
+	// ceiling
+	auto ceiling = wrapper.loadTransform(glm::vec3(0, 25, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_ceiling);
+	// walls
+	auto wall_red = wrapper.loadTransform(glm::vec3(0, 0, 15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_red);
+	auto wall_green = wrapper.loadTransform(glm::vec3(0, 0, -15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_green);
+	auto wall_front = wrapper.loadTransform(glm::vec3(30, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto wall_back = wrapper.loadTransform(glm::vec3(-15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto cornellBox = wrapper.loadCollection({ floor, ceiling, wall_red, wall_green, wall_front, wall_back });
+
+	radius = 4;
+	std::vector<PackedRef> suzanneRings;
+	for (float ring = 1; ring < 2; ring++) for (float r = 0; r < PI * 2; r += PI / (3 * ring))
+	{
+		suzanneRings.push_back(wrapper.loadTransform(glm::vec3(offset + (std::sin(r) * (ring * radius)), -4, offset + (std::cos(r) * (ring * radius))), glm::vec3(0, PI / 2, 0), glm::vec3(1), suzanneIndex));
+	}
+	auto suzanneCollection = wrapper.loadCollection(suzanneRings);
+	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), readingroomIndex);	
+	//auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(2), tomatoIndex);
+	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
+
+	PackedRef prism = wrapper.loadObj("assets/icosphere2.obj", 11);
+	Collection prisms;
+	radius = 6;
+	prisms.push_back(
+			wrapper.loadTransform(glm::vec3(0, -3, 0), glm::vec3(0, wrapper.time / PI, 0), glm::vec3(3), prism)
+		);
+	auto prismCollection = wrapper.loadCollection(prisms);
+
+
+	wrapper.camera = CameraWrapper{
+		.origin = glm::vec3(0, 0.75, 1),
+		.fov = 20
+	};
+
+	wrapper.shaderData.backgroundColor = sky;
+
+	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection, /*splatCollection,*/ suzanneCollection });
+}
+
+PackedRef fractal(VK_Wrap& wrapper)
+{
+	std::string prefix = "renderedFrames/fractal_";
+
+	glm::vec4 sky = glm::vec4(0.5);
+	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
+	glm::vec4 light_white = glm::vec4(10);
+
+	wrapper.shaderData.backgroundColor = sky;
+	wrapper.materials = std::vector<Material>{
+			Material{ pastel_orange, 0},				// 00
+			Material{ sky, 0 },
+			Material{ sky, 0, 0, light_white }
+	};
+	PackedRef suzanneInstance = wrapper.loadObj("assets/suzanne.obj", 0);
+
+	PackedRef suzanneTransform = wrapper.loadTransform(glm::vec3(4, 10, 0), glm::vec3(0), glm::vec3(1), suzanneInstance);
+
+	PackedRef recursiveTransform = wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0, PI / 8, 0), glm::vec3(0.7), packChild(EMPTY, 0));
+
+	PackedRef suzanneCollection = wrapper.loadCollection({ suzanneTransform });
+
+	PackedRef recursiveCollection = wrapper.loadCollection({ suzanneCollection, recursiveTransform});
+	
+	wrapper.updateTransform(recursiveTransform, recursiveCollection);  // need to update transform child once tree has been built
+	
+	std::cout << "recursive collection index: " << unpackIndex(recursiveCollection);
+
+	if (wrapper.transforms[unpackIndex(recursiveTransform)].childPrim != EMPTY)
+	{
+		std::cout << "recursive transform child was set correctly\n";
+		std::cout << "New child index: " << wrapper.transforms[unpackIndex(recursiveTransform)].childIndex << "\n";
+	}
+
+	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 1);
+	PackedRef wallIndex_ceiling = wrapper.loadObj("assets/plane.obj", 1);
+	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 1);
+	PackedRef wallIndex_red = wrapper.loadObj("assets/plane.obj", 1);
+
+	wrapper.spheres.push_back(Sphere{
+		Sphere{
+			.center = glm::vec3(0),
+			.radius = 1,
+			.materialIndex = 2
+		}
+		});
+
+	PackedRef sphereTransform = wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), packChild(SPHERE, 0));
+
+	// floor
+	auto floor = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_white);
+	// ceiling
+	auto ceiling = wrapper.loadTransform(glm::vec3(0, 25, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_ceiling);
+	// walls
+	auto wall_red = wrapper.loadTransform(glm::vec3(0, 0, 15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_red);
+	auto wall_green = wrapper.loadTransform(glm::vec3(0, 0, -15), glm::vec3(PI / 2., 0, 0), glm::vec3(1), wallIndex_green);
+	auto wall_front = wrapper.loadTransform(glm::vec3(30, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto wall_back = wrapper.loadTransform(glm::vec3(-15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
+	auto cornellBox = wrapper.loadCollection({ floor, ceiling, wall_red, wall_green, wall_front, wall_back });
+
+
+
+	return wrapper.loadCollection({ recursiveCollection });
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)
@@ -465,6 +715,12 @@ PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool res
 	case 8:
 		root = prism_demo(wrapper);
 		break;
+	case 9:
+		root = demo_video(wrapper);
+		break;
+	case 10:
+		root = fractal(wrapper);
+		break;
 	default:
 		root = suzannes_row_instancesNxN(wrapper, 100);
 		break;
@@ -481,11 +737,15 @@ int main(int argc, char* argv[])
 	std::cout << "Hello World!\n";
 
 	VK_Wrap wrapper;
+	wrapper.savePath = "default.exr";
 
-	wrapper.numFramesPerFile = 2000;
-	wrapper.numImagesPerSequence = 16;
-	wrapper.time_delta = PI / 8;
-	int choice = 5;
+	wrapper.numFramesPerFile = 100;
+	wrapper.numImagesPerSequence = 1;
+	float end_time = ((PI * 2) / 5);
+	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
+	wrapper.time = ((PI * 2) / 5) * (13 / 14);
+
+	int choice = 4;
 
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 	wrapper.shaderData.sceneRoot = root;
@@ -493,7 +753,6 @@ int main(int argc, char* argv[])
 	wrapper.init();
 	bool running = true;
 	float prevT = wrapper.time;
-	wrapper.savePath = "renderedFrames/prismDemo" + std::to_string(wrapper.time) + ".exr";
 
 	while (running)
 	{
@@ -507,7 +766,6 @@ int main(int argc, char* argv[])
 			// reset nodes
 			wrapper.clearPrimitives();
 
-			wrapper.savePath = "renderedFrames/prismDemo" + std::to_string(wrapper.time) + ".exr";
 
 			root = pickRoot(wrapper, choice, argc, argv, false);
 
