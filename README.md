@@ -8,11 +8,11 @@ Progressive Spectral Monte Carlo GPU path tracer written in Slang and C++ using 
 
 - Sphere primitives
 - Triangle primitives + OBJ loader
-- BSDF mmaterial support for ior and metallic
+- BSDF material support for ior and metallic
 - CPU BVH construction and GPU traversal
 - Mesh lights
 - Gaussian Splat primitives + PLY loader
-- Progressve path tracing with temporal accumulation
+- Progressive path tracing with temporal accumulation
 - Transforms (location, rotation, scale)
 - Instancing
 - TLAS/BLAS separation
@@ -85,6 +85,17 @@ This results in effects such as: \
 - real-time to slow motion
 - reversing time mid animation
 - fast forward
+
+# Building and contributing
+
+The project uses [cmake](https://cmake.org/) and requires [vulkan SDK](https://vulkan.org/tools#download-these-essential-development-tools) and [tinyexr](https://github.com/syoyo/tinyexr).\
+When installing vulkan, `volk`, `VMA`, `SDL`, and `GLM` need to be selected. \
+tinyexr is included as a git submodule.
+
+1. Install Vulkan with requirements (volk, VMA, SDL, GLM)
+2. Clone repository: `git clone https://github.com/BCaven/OfflineRaytracingGPU.git`
+3. Get tinyexr: `cd OfflineRaytracingGPU && git submodule update --init --recursive`
+4. Build: 
 
 # References:
 

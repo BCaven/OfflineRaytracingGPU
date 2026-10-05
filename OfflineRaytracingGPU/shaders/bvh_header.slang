@@ -1,7 +1,7 @@
 implementing scene;
 
 // NOTE: this should be as small as possible :)
-static const uint MAX_TRANSFORM_DEPTH = 16;
+static const uint MAX_TRANSFORM_DEPTH = 4;
 struct TraversalNode
 {
     uint packedIndexType;

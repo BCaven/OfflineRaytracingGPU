@@ -737,15 +737,15 @@ int main(int argc, char* argv[])
 	std::cout << "Hello World!\n";
 
 	VK_Wrap wrapper;
-	wrapper.savePath = "default.exr";
+	wrapper.savePath = "renderedFrames/default.exr";
 
-	wrapper.numFramesPerFile = 100;
-	wrapper.numImagesPerSequence = 1;
-	float end_time = ((PI * 2) / 5);
+	wrapper.numFramesPerFile = 1000;
+	wrapper.numImagesPerSequence = 16;
+	float end_time = (PI * 2);
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
-	wrapper.time = ((PI * 2) / 5) * (13 / 14);
+	wrapper.time = 0;
 
-	int choice = 4;
+	int choice = 7;
 
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 	wrapper.shaderData.sceneRoot = root;
