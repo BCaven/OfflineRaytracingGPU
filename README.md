@@ -95,9 +95,9 @@ tinyexr is included as a git submodule.
 1. Install Vulkan with requirements (volk, VMA, SDL, GLM)
 2. Clone repository: `git clone https://github.com/BCaven/OfflineRaytracingGPU.git`
 3. Get tinyexr: `cd OfflineRaytracingGPU && git submodule update --init --recursive`
-4. Build:
-    a. with visual studio: open `OfflineRaytracingGPU` folder in Visual Studio and select `OfflineRaytracingGPU/CmakeList.txt` when prompted
-    b. with cmake: `cmake OfflineRaytracingGPU/ -B OfflineRaytracingGPU/out/ && cmake --build OfflineRaytracingGPU/out/`
+4. Build: \
+   with visual studio: open `OfflineRaytracingGPU` folder in Visual Studio and select `OfflineRaytracingGPU/CmakeList.txt` when prompted \
+   with cmake: `cmake OfflineRaytracingGPU/ -B OfflineRaytracingGPU/out/ && cmake --build OfflineRaytracingGPU/out/`
 
 # References:
 
