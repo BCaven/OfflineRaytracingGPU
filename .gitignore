@@ -366,10 +366,6 @@ FodyWeavers.xsd
 
 assets/
 
-# ignore tinyexr
-
-tinyexr/
-
 # Ignore mesh files
 *.ply
 *.obj
