@@ -81,7 +81,7 @@ Read more about this type of gaussian splat ray tracing here: [Stochastic Ray Tr
 
 Animations are supported by accessing `wrapper.time` during scene construction. \
 Manual time steps are supported as well as automated rendering of animation sequences. Timesteps (`wraper.time_delta`) can also be changed during an animation sequence, allowing for easy interpolation and modification of time in the animation. \
-This results in effects such as: \
+This results in effects such as:
 - real-time to slow motion
 - reversing time mid animation
 - fast forward
@@ -95,7 +95,9 @@ tinyexr is included as a git submodule.
 1. Install Vulkan with requirements (volk, VMA, SDL, GLM)
 2. Clone repository: `git clone https://github.com/BCaven/OfflineRaytracingGPU.git`
 3. Get tinyexr: `cd OfflineRaytracingGPU && git submodule update --init --recursive`
-4. Build: 
+4. Build:
+    a. with visual studio: open `OfflineRaytracingGPU` folder in Visual Studio and select `OfflineRaytracingGPU/CmakeList.txt` when prompted
+    b. with cmake: `cmake OfflineRaytracingGPU/ -B OfflineRaytracingGPU/out/ && cmake --build OfflineRaytracingGPU/out/`
 
 # References:
 
