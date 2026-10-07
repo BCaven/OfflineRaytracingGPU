@@ -65,6 +65,9 @@ struct Ray
 
 using PackedRef = unsigned int;
 
+using Collection = std::vector<PackedRef>;
+
+
 // TODO: later this will be removed since the BVH will exclusively be on the GPU
 enum PrimType : unsigned int
 {

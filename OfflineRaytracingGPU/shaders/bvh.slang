@@ -170,7 +170,7 @@ Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType roo
         {
             KDopNodeHot hot = kdopHotNodes[nodeIndex];
             float tHit[KDOP_WIDTH];
-            uint validMask = intersectKDopChildren(nodeIndex, hot, intersectionRay.origin, intersectionRay.direction, closest.t, 1., tHit);
+            uint validMask = intersectKDopChildren(nodeIndex, hot, intersectionRay.origin, intersectionRay.direction, closest.t, transformNode.tScale, tHit);
 
             if (validMask == 0u)
             {
@@ -248,7 +248,7 @@ Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType roo
         else
         {
             // primitive or a transform -> transform chain
-            processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, nodeIndex, currentType, closest.t);
+            processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, nodeIndex, currentType, current.tEntry);
         }
         releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
     }

@@ -14,7 +14,6 @@
 
 using namespace std;
 
-using Collection = std::vector<PackedRef>;
 
 PackedRef suzannes_no_collectionsNxN(VK_Wrap& wrapper, int n)
 {
@@ -171,7 +170,7 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 
 	Collection lightSpheres;
 	unsigned int sphereIndex = 0;
-	for (int i = 0; i < 5000; i++)
+	for (int i = 0; i < 1000; i++)
 	{
 		lightSpheres.push_back(wrapper.loadTransform(glm::vec3(rand(gen), -45, rand(gen)), glm::vec3(0), glm::vec3(1), packChild(SPHERE, sphereIndex)));
 		sphereIndex++;
@@ -204,7 +203,7 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 
 	}
 	wrapper.shaderData.backgroundColor = sky;
-	wrapper.camera.origin = glm::vec3(0, 100, 0);
+	wrapper.camera.origin = glm::vec3(0, 5, 0);
 	suzanneCollection.insert(suzanneCollection.end(), lightSpheres.begin(), lightSpheres.end());
 	return wrapper.loadCollection(suzanneCollection);
 }
@@ -379,11 +378,8 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 	}; 
 
 	// TODO: maybe split this into chunks to easy traversal cost
-	PackedRef readingroomHalf1 = wrapper.loadSplat2("assets/readingroom_half1.ply");
-	PackedRef readingroomHalf2 = wrapper.loadSplat2("assets/readingroom_half2.ply");
-
-	Collection spheres;
-
+	//Collection readingroomCollection = wrapper.loadSplatCollection("assets/readingroom_1x_180.ply");
+	PackedRef readingroomSplat = wrapper.loadSplat("assets/readingroom_1x_180.ply");
 	float radius = 3;
 	float offset = 0; //radius / 2;
 	float rot = wrapper.time;
@@ -401,10 +397,8 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 	{
 		PackedRef p = packChild(PrimType::SPHERE, i);
 		float r = 1; //(rand(gen) + 1);
-		spheres.push_back(wrapper.loadTransform(glm::vec3(3, 0, 3), glm::vec3(0, 0, 0), glm::vec3(1, r, 1), p));
+		//readingroomCollection.push_back(wrapper.loadTransform(glm::vec3(3, 0, 3), glm::vec3(0, 0, 0), glm::vec3(1, r, 1), p));
 	}
-
-	PackedRef spheresPtr = wrapper.loadCollection(spheres);
 
 	wrapper.camera = CameraWrapper{
 	.origin = glm::vec3(0, 0.75, 1),
@@ -413,7 +407,9 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return wrapper.loadCollection({ spheresPtr, readingroomHalf1, readingroomHalf2});
+	//std::cout << "Size of readingroomCollection: " << readingroomCollection.size() << "\n";
+
+	return readingroomSplat;//wrapper.loadCollection(readingroomCollection);
 
 }
 
@@ -614,25 +610,29 @@ PackedRef demo_video(VK_Wrap& wrapper)
 
 PackedRef fractal(VK_Wrap& wrapper)
 {
-	std::string prefix = "renderedFrames/fractal_";
+	std::string prefix = "renderedFrames/fractal_2_";
+	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
 
 	glm::vec4 sky = glm::vec4(0.5);
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
-	glm::vec4 light_white = glm::vec4(10);
+	glm::vec4 light_1 = 1.f * glm::vec4(83, 236, 228, 255) / 255.0f;
+	glm::vec4 light_2 = 1.f * glm::vec4(181, 150, 243, 255) / 255.0f;
 
 	wrapper.shaderData.backgroundColor = sky;
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 0},				// 00
 			Material{ sky, 0 },
-			Material{ sky, 0, 0, light_white }
+			Material{ sky, 0, 0, light_1 },
+			Material{ sky, 0, 0, light_2 }
 	};
 	PackedRef suzanneInstance = wrapper.loadObj("assets/suzanne.obj", 0);
 
-	PackedRef suzanneTransform = wrapper.loadTransform(glm::vec3(4, 10, 0), glm::vec3(0), glm::vec3(1), suzanneInstance);
+	PackedRef suzanneTransform = wrapper.loadTransform(glm::vec3(4, 0, 4), glm::vec3(0), glm::vec3(1), suzanneInstance);
+	PackedRef suzanneTransform2 = wrapper.loadTransform(glm::vec3(-4, 0, -4), glm::vec3(0), glm::vec3(1), suzanneInstance);
 
 	PackedRef recursiveTransform = wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0, PI / 8, 0), glm::vec3(0.7), packChild(EMPTY, 0));
 
-	PackedRef suzanneCollection = wrapper.loadCollection({ suzanneTransform });
+	PackedRef suzanneCollection = wrapper.loadCollection({ suzanneTransform, suzanneTransform2 });
 
 	PackedRef recursiveCollection = wrapper.loadCollection({ suzanneCollection, recursiveTransform});
 	
@@ -648,7 +648,7 @@ PackedRef fractal(VK_Wrap& wrapper)
 
 	PackedRef wallIndex_white = wrapper.loadObj("assets/plane.obj", 1);
 	PackedRef wallIndex_ceiling = wrapper.loadObj("assets/plane.obj", 1);
-	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 1);
+	PackedRef wallIndex_green = wrapper.loadObj("assets/plane.obj", 2);
 	PackedRef wallIndex_red = wrapper.loadObj("assets/plane.obj", 1);
 
 	wrapper.spheres.push_back(Sphere{
@@ -658,11 +658,19 @@ PackedRef fractal(VK_Wrap& wrapper)
 			.materialIndex = 2
 		}
 		});
+	wrapper.spheres.push_back(Sphere{
+		Sphere{
+			.center = glm::vec3(0),
+			.radius = 1,
+			.materialIndex = 3
+		}
+		});
 
-	PackedRef sphereTransform = wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), packChild(SPHERE, 0));
+	PackedRef sphereTransform1 = wrapper.loadTransform(glm::vec3(7, 7, 0), glm::vec3(0), glm::vec3(1), packChild(SPHERE, 0));
+	PackedRef sphereTransform2 = wrapper.loadTransform(glm::vec3(-7, 7, 0), glm::vec3(0), glm::vec3(1), packChild(SPHERE, 1));
 
 	// floor
-	auto floor = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_white);
+	auto floor = wrapper.loadTransform(glm::vec3(0, -1, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_white);
 	// ceiling
 	auto ceiling = wrapper.loadTransform(glm::vec3(0, 25, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_ceiling);
 	// walls
@@ -672,21 +680,30 @@ PackedRef fractal(VK_Wrap& wrapper)
 	auto wall_back = wrapper.loadTransform(glm::vec3(-15, 0, 0), glm::vec3(0, 0, PI / 2.), glm::vec3(1), wallIndex_white);
 	auto cornellBox = wrapper.loadCollection({ floor, ceiling, wall_red, wall_green, wall_front, wall_back });
 
+	wrapper.camera = CameraWrapper{
+		.origin = glm::vec3(17, 9, 0),
+		.direction = glm::normalize(glm::vec3(-17, -9, 0)),
+		.fov = 30 - wrapper.time,
+	};
 
+	wrapper.camera.right = glm::normalize(glm::cross(wrapper.camera.direction, WORLD_UP));
+	wrapper.camera.up = glm::cross(wrapper.camera.right, wrapper.camera.direction);
 
-	return wrapper.loadCollection({ recursiveCollection });
+	return wrapper.loadCollection({ recursiveCollection, cornellBox });
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)
 {
 	auto oldCam = wrapper.camera;
 	PackedRef root = 0;
+	int selection = choice;
 	// build the scene
-	if (argc > 2)
+	if (argc >= 2)
 	{
-		int choice = std::atoi(argv[1]);
+		std::cout << "Using command line choice: " << argv[1] << "\n";
+		selection = std::atoi(argv[1]);
 	}
-	switch (choice)
+	switch (selection)
 	{
 	case 0:
 		root = suzannes_no_collectionsNxN(wrapper, 1000);
@@ -739,13 +756,13 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 	wrapper.savePath = "renderedFrames/default.exr";
 
-	wrapper.numFramesPerFile = 1000;
-	wrapper.numImagesPerSequence = 16;
-	float end_time = (PI * 2);
+	wrapper.numFramesPerFile = 200;
+	wrapper.numImagesPerSequence = 20;
+	float end_time = 29;
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 7;
+	int choice = 4;
 
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 	wrapper.shaderData.sceneRoot = root;
@@ -767,7 +784,7 @@ int main(int argc, char* argv[])
 			wrapper.clearPrimitives();
 
 
-			root = pickRoot(wrapper, choice, argc, argv, false);
+			root = pickRoot(wrapper, choice, argc, argv, true);
 
 			wrapper.reloadPrimitives();
 

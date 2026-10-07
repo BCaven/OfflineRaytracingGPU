@@ -26,6 +26,8 @@ void KeyInputs::handleKeyInputs()
 	NEXT_TIME = keyboardState[SDL_SCANCODE_RIGHT];
 	PREV_TIME = keyboardState[SDL_SCANCODE_LEFT];
 
+	CAM_STATS = keyboardState[SDL_SCANCODE_0];
+
 	QUIT = (QUIT || keyboardState[SDL_SCANCODE_ESCAPE]);
 
 	SDL_Event e;

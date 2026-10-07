@@ -1,6 +1,6 @@
 # Offline GPU Path Tracer
 
-Progressive Spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
+Interactive progressive spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 ![5.9m splats](ProjectAssets/SplatInterior.png)
 
 
@@ -12,7 +12,7 @@ Progressive Spectral Monte Carlo GPU path tracer written in Slang and C++ using 
 - CPU BVH construction and GPU traversal
 - Mesh lights
 - Gaussian Splat primitives + PLY loader
-- Progressive path tracing with temporal accumulation
+- Progressive path tracing with temporal accumulation and interactive camera
 - Transforms (location, rotation, scale)
 - Instancing
 - TLAS/BLAS separation
@@ -21,6 +21,10 @@ Progressive Spectral Monte Carlo GPU path tracer written in Slang and C++ using 
 - Spectral sampling
 - Compute shader pipeline
 - Animations with variable time step
+
+# Results
+
+
 
 # Implementation details
 
@@ -99,12 +103,16 @@ tinyexr is included as a git submodule.
    with visual studio: open `OfflineRaytracingGPU` folder in Visual Studio and select `OfflineRaytracingGPU/CmakeList.txt` when prompted \
    with cmake: `cmake OfflineRaytracingGPU/ -B OfflineRaytracingGPU/out/ && cmake --build OfflineRaytracingGPU/out/`
 
+Make a pull request if you want to contribute :)
+
 # References:
 
 Sun, Xin, et al. "Stochastic Ray Tracing of Transparent 3D Gaussians." arXiv preprint arXiv:2504.06598 (2025). \
 Feldman, Benjamin. (May 2026). “3D Gaussian Splatting in a Weekend”. bfeldman.me. https://bfeldman.me/3dgs-weekend/. \
 Arman Uguray. "Ray Tracing: GPU Edition". https://raytracing.github.io/gpu-tracing/book/RayTracingGPUEdition.html. \
-Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with a short stack." Proceedings of the Conference on High-Performance Graphics. 2019.
+Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with a short stack." Proceedings of the Conference on High-Performance Graphics. 2019. \
+Káčerik, Martin, and Jiří Bittner. "SAH-Optimized k-DOP Hierarchies for Ray Tracing." Proceedings of the ACM on Computer Graphics and Interactive Techniques 7.3 (2024): 1-16. \
+Willems, Sascha. "How to Vulkan in 2026." https://www.howtovulkan.com/
 
 # Gallery
 ![spectral scattering](ProjectAssets/IcospherePrism.png)
@@ -112,6 +120,7 @@ Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with 
 ![transforms](ProjectAssets/transformed_spheres.png)
 ![Second image](ProjectAssets/SuzanneWithSpheres.png)
 ![First image](ProjectAssets/FirstImage_Spheres.png)
+![fractal gif](ProjectAssets/fractal_2.gif)
 
 8 billion instances of Suzanne illuminated by sphere mesh lights:
 ![8b Suzanne](ProjectAssets/8b_suzannes_with_lights.png)

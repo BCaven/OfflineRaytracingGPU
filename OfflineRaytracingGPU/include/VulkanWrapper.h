@@ -349,6 +349,10 @@ public:
 
 	PackedRef loadSplat2(std::string filepath);
 
+	std::vector<KDopLeaf> loadSplat_helper(std::string filepath);
+
+	Collection loadSplatCollection(std::string filepath);
+
 	void updateTransform(PackedRef transformRef, PackedRef newChild);
 
 	void validateBVHNode(PackedRef childRef, std::unordered_set<int>& visiting, std::unordered_set<int>& visited);

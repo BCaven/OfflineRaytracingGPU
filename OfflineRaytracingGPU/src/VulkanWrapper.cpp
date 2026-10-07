@@ -1985,6 +1985,7 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH(PackedRef root, int transformIndex)
 
 PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 {
+	std::cout << "Loading collection\n";
 	bool useKdop = references.size() > 8;
 	std::vector<LeafItem> leavesAABB;
 	std::vector<KDopLeaf> leavesKdop;
@@ -2571,6 +2572,34 @@ PackedRef VK_Wrap::loadSplat(std::string filepath)
 
 PackedRef VK_Wrap::loadSplat2(std::string filepath)
 {
+	auto leaves = loadSplat_helper(filepath);
+
+	std::cout << "building tree\n";
+	K14Dop outDop;
+	int binaryKdop = build14DOP_parallel(leaves, 0, leaves.size(), outDop);
+
+	std::cout << "flattening tree\n";
+	return packChild(KDOP_NODE, flattenKDop(binaryKdop));
+}
+
+Collection VK_Wrap::loadSplatCollection(std::string filepath)
+{
+	std::vector<KDopLeaf> leaves = loadSplat_helper(filepath);
+	Collection prims;
+	for (KDopLeaf leaf : leaves)
+	{
+		if (leaf.type != GAUSSIAN_SPLAT)
+		{
+			std::cout << "Hey this collection is not full of splats!\n";
+		}
+		prims.push_back(packChild(leaf.type, leaf.index));
+	}
+	std::cout << "Splat contains: " << prims.size() << " primitives\n";
+	return prims;
+}
+
+std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
+{
 	std::cout << "Loading " << filepath << "\n";
 
 	std::ifstream file(filepath, std::ios::binary);
@@ -2762,7 +2791,7 @@ PackedRef VK_Wrap::loadSplat2(std::string filepath)
 			.center = center,
 			.kDop = dop
 		};
-		};
+	};
 
 	std::cout << "Building threads\n";
 	// ---- chunked parallel dispatch ----
@@ -2779,13 +2808,10 @@ PackedRef VK_Wrap::loadSplat2(std::string filepath)
 			for (std::size_t i = begin; i < end; ++i) processVertex(i);
 			});
 	}
+	std::cout << "waiting for threads\n";
 	for (auto& w : workers) w.join();
-	std::cout << "building tree\n";
-	K14Dop outDop;
-	int binaryKdop = build14DOP_parallel(leaves, 0, leaves.size(), outDop);
 
-	std::cout << "flattening tree\n";
-	return packChild(KDOP_NODE, flattenKDop(binaryKdop));
+	return leaves;
 }
 
 void VK_Wrap::updateTransform(PackedRef transformRef, PackedRef newChild)
@@ -3658,6 +3684,14 @@ bool VK_Wrap::draw()
 			time -= time_delta;
 			std::cout << "new time: " << time << "\n";
 		}
+	}
+
+	if (KeyInputs::CAM_STATS)
+	{
+		std::cout << "Camera stats: \n" <<
+			"origin: " << camera.origin.x << ", " << camera.origin.y << ", " << camera.origin.z << "\n" <<
+			"direction: " << camera.direction.x << ", " << camera.direction.y << ", " << camera.direction.z << "\n" <<
+			"fov: " << camera.fov << "\n";
 	}
 	updateSwapchain = KeyInputs::WINDOW_RESIZED;
 	if (camMoved)

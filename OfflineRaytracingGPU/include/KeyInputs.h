@@ -67,6 +67,7 @@ public:
 	static inline std::atomic<bool> MOUSE_RIGHT_PRESSED = false;
 	static inline std::atomic<float> MOUSE_WHEEL = 0.0;
 	static inline std::atomic<bool> WINDOW_RESIZED = false;
+	static inline std::atomic<bool> CAM_STATS = false;
 	static inline std::atomic<bool> QUIT = false;
 
 
