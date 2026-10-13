@@ -1,8 +1,16 @@
-# Progressive GPU Path Tracer
+# Offline GPU Path Tracer
 
 Interactive progressive spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 ![5.9m splats](ProjectAssets/SplatInterior.png)
 
+# Controls and terminology
+
+This path tracer is interactive. mouse + WASD move the camera but the image only converges when the scene is the same as the previous frame. Each frame processes a single bounce, allowing for responsive temporal accumulation.
+
+Camera movement uses FPS controls: mouse + `WASD` with `Q` and `E` for altitude control. \
+Arrow keys `right` and `left` move through time. \
+`R` locks the view and initiates the automated render sequence. \
+`ESCAPE` ends the program.
 
 # Project features
 
@@ -21,10 +29,6 @@ Interactive progressive spectral Monte Carlo GPU path tracer written in Slang an
 - Spectral sampling
 - Compute shader pipeline
 - Animations with variable time step
-
-# Results
-
-
 
 # Implementation details
 
@@ -89,6 +93,15 @@ This results in effects such as:
 - real-time to slow motion
 - reversing time mid animation
 - fast forward
+
+## Automated render sequence
+
+When initiated, the scene controls are locked and the renderer proceeds along the specified animation using: \
+`wrapper.time` and `wrapper.time_delta` until a set number of frames have been rendered (`wrapper.numImagesPerSequence`). \
+The number of rays accumulated per image is controlled by `wrapper.numFramesPerFile`. 
+
+The scene is rebuilt between each subsequent time step in the animation.
+
 
 # Building and contributing
 
