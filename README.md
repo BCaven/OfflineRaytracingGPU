@@ -1,4 +1,4 @@
-# Offline GPU Path Tracer
+# Progressive GPU Path Tracer
 
 Interactive progressive spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 ![5.9m splats](ProjectAssets/SplatInterior.png)
