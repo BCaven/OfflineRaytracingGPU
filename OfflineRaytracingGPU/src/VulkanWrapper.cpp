@@ -92,6 +92,41 @@ void VK_Wrap::init()
 
 	loadStructuredBuffer("transforms", transforms);
 
+	if (bThreaded)
+	{
+		std::cout << "Loading threaded nodes!\n";
+		auto prevRoot = shaderData.sceneRoot;
+		glm::vec3 sceneMin(-FLT_MAX);
+		glm::vec3 sceneMax(FLT_MAX);
+		if (unpackType(prevRoot) != BVH_NODE)
+		{
+			std::cout << "Hey! you are trying to load a tree that does not have a bvh node as the root!!!\n";
+		} 
+		else
+		{
+			auto node = bvhNodes[unpackIndex(prevRoot)];
+			sceneMin = make_aabb_min(node.left.min, node.right.min);
+			sceneMax = make_aabb_max(node.left.max, node.right.max);
+		}
+		auto root = buildThreadedBVH2(prevRoot, sceneMin, sceneMax, SENTINEL_REF, -1);
+		std::cout << "finished building threaded nodes!\n";
+
+		if (root.transformIndex >= 0)   // root is TRANSFORM -> BVH_NODE: traversal starts in world space
+		{
+			int idx = (int)threadedNodes.size();
+			threadedNodes.push_back(tbvhNode{ sceneMin, sceneMax, root.retNode, SENTINEL_REF, -1, root.transformIndex });
+			root.retNode = packChild(PrimType::THREADED_NODE, idx);
+		}
+		
+		
+		std::cout << "Num threaded nodes: " << threadedNodes.size() << "\n";
+
+		shaderData.sceneRoot = root.retNode;
+	}
+
+	loadStructuredBuffer("threadedNodes", threadedNodes);
+	loadStructuredBuffer("transformMats", threadedMatrices);
+
 	int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
 	uint32_t initialGroupCount = 64;
 	loadStructuredBuffer<Ray>("rayQueueA", {}, maxRaysPerQueue);
@@ -118,7 +153,7 @@ void VK_Wrap::init()
 	for (auto name : {
 		"rayQueueA","rayQueueB","counters",
 		"spheres", "triangles", "splats", "shMats", "materials", "bvhNodes",
-		"kdopHotNodes", "kdopColdNodes", "transforms" })
+		"kdopHotNodes", "kdopColdNodes", "transforms", "threadedNodes", "transformMats" })
 		updateStructuredBufferDescriptors(name);
 
 	updateImageDescriptors("currentFrameRGB");
@@ -176,9 +211,12 @@ void VK_Wrap::reloadPrimitives()
 	loadStructuredBuffer("kdopColdNodes", kdopColdNodes);
 	loadStructuredBuffer("transforms", transforms);
 
+	loadStructuredBuffer("threadedNodes", threadedNodes);
+	loadStructuredBuffer("transformMats", threadedMatrices);
+
 	for (auto name : {
 		"spheres", "triangles", "splats", "shMats", "materials", "bvhNodes",
-		"kdopHotNodes", "kdopColdNodes", "transforms" })
+		"kdopHotNodes", "kdopColdNodes", "transforms", "threadedNodes",  "transformMats" })
 		updateStructuredBufferDescriptors(name);
 }
 
@@ -1949,44 +1987,172 @@ int VK_Wrap::buildChildBVH(std::vector<LeafItem>& leaves)
 	return buildSAH(leaves, 0, leaves.size(), childMin, childMax);
 }
 
-ThreadedWrapper VK_Wrap::buildThreadedBVH(PackedRef root, int transformIndex)
+/*
+Each node needs:
+child to pursue
+transform to pursue
+miss node
+miss transform
+
+
+*/
+int VK_Wrap::registerMatrix(glm::mat4 mat)
+{
+	threadedMatrices.push_back(mat);
+	return threadedMatrices.size() - 1;
+}
+ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm::vec3 boxMax,
+	PackedRef missRef, int missT)
+{
+	// collapse TRANSFORM chain: hitMat = box space -> content space,
+	// missMat = miss target re-expressed relative to the content space
+	// Collapse the TRANSFORM chain.
+	//
+	// hitMat maps from the incoming box space to the content space.
+	// missMat stores the inverse of the transition from content space
+	// to the miss continuation, because traversal inverts miss matrices.
+
+	glm::mat4 hitMat(1.0f);
+	bool crossed = false;
+
+	while (unpackType(ref) == PrimType::TRANSFORM)
+	{
+		const Transform& t = transforms[unpackIndex(ref)];
+
+		// Incoming box space -> transformed content space.
+		hitMat = t.invMatrix * hitMat;
+
+		ref = packChild(t.childPrim, t.childIndex);
+		crossed = true;
+	}
+
+	int hitT = crossed ? registerMatrix(hitMat) : -1;
+
+	int contentMissT = missT;
+
+	if (crossed)
+	{
+		// Incoming box space -> miss destination.
+		glm::mat4 oldMissMat =
+			(missT >= 0)
+			? threadedMatrices[missT]
+			: glm::mat4(1.0f);
+
+		// Content space -> miss destination.
+		glm::mat4 contentMissMat =
+			oldMissMat * glm::inverse(hitMat);
+
+		contentMissT = registerMatrix(contentMissMat);
+	}
+
+	if (unpackType(ref) == PrimType::BVH_NODE)
+	{
+		int ci = unpackIndex(ref);
+		if (ci >= bvhNodes.size()) 
+		{ 
+			// hey that is an invalid node!
+			std::cout << "Invalid BVH node when building threaded bvh\n";
+		}
+		const bvhNode& n = bvhNodes[ci];
+
+		auto right = buildThreadedBVH2(packChild(n.right.type, n.right.index),
+			n.right.min, n.right.max, missRef, contentMissT);
+
+		int toRightT = right.transformIndex;
+
+
+		auto left = buildThreadedBVH2(packChild(n.left.type, n.left.index),
+			n.left.min, n.left.max, right.retNode, toRightT);
+
+		int idx = (int)threadedNodes.size();
+		threadedNodes.push_back(tbvhNode{
+			.min = make_aabb_min(n.left.min, n.right.min),
+			.max = make_aabb_max(n.left.max, n.right.max),
+			.packedChild = left.retNode,
+			.packedMiss = missRef,
+			.missTransform = contentMissT,
+			.hitTransform = left.transformIndex });
+		return { packChild(PrimType::THREADED_NODE, idx), hitT };
+	}
+
+	// primitive: its own node, tested in the *box* space, so miss stays relative to missT
+	int idx = (int)threadedNodes.size();
+	threadedNodes.push_back(tbvhNode{
+		.min = boxMin, .max = boxMax,
+		.packedChild = ref,
+		.packedMiss = missRef,
+		.missTransform = missT,
+		.hitTransform = hitT });
+	return { packChild(PrimType::THREADED_NODE, idx), -1 };
+}
+
+ThreadedWrapper VK_Wrap::buildThreadedBVH(PackedRef hitRef, int hitT, PackedRef missRef, int missT)
 {
 	// taking an existing tree and converting it to threaded nodes.
-	PrimType rootType = unpackType(root);
-	int rootIndex = unpackIndex(root);
-	int latestTransform = transformIndex;
+	PrimType currentType = unpackType(hitRef);
+	int currentIndex = unpackIndex(hitRef);
+	int latestTransform = hitT;
+	int contentMissT = -1;
 
-	// Crawl the tree and convert nodes, it would be nice to have these sorted so nodes in the same trees are close together
-	// TODO: need to handle transforms as well
-	// I think it would be simplest to have this be recursive
-	if (rootType == PrimType::BVH_NODE)
+	if (currentType == PrimType::BVH_NODE)
 	{
+		int ci = unpackIndex(hitRef);
+		if (ci >= bvhNodes.size())
+		{
+			// hey that is an invalid node!
+			std::cout << "Invalid BVH node when building threaded bvh\n";
+		}
+		const bvhNode& n = bvhNodes[ci];
 
+		auto right = buildThreadedBVH(packChild(n.right.type, n.right.index), -1, missRef, contentMissT);
+
+		// left's miss edge ENTERS right's space; the traversal inverts miss matrices,
+		// so store the inverse of right's hit matrix
+		int toRightT = (right.transformIndex >= 0)
+			? registerMatrix(glm::inverse(threadedMatrices[right.transformIndex])) : -1;
+
+		auto left = buildThreadedBVH(packChild(n.left.type, n.left.index), -1, right.retNode, toRightT);
+
+		int idx = (int)threadedNodes.size();
+		threadedNodes.push_back(tbvhNode{
+			.min = make_aabb_min(n.left.min, n.right.min),
+			.max = make_aabb_max(n.left.max, n.right.max),
+			.packedChild = left.retNode,
+			.packedMiss = missRef,
+			.missTransform = contentMissT,
+			.hitTransform = left.transformIndex });
+		return { packChild(PrimType::THREADED_NODE, idx), hitT };
 	}
-	else if (rootType == PrimType::KDOP_NODE)
+	else if (currentType == PrimType::TRANSFORM)
 	{
-		// need to do these to binary nodes
-
-
-	}
-	else if (rootType == PrimType::TRANSFORM)
-	{
-		Transform t = transforms[rootIndex];
+		Transform t = transforms[currentIndex];
 		// all nodes after this need to have this matrix as their miss matrix
 		latestTransform = threadedMatrices.size();
 		threadedMatrices.push_back(t.invMatrix);
+		int newMissT = missT;
+		auto missMat = t.invMatrix;
+
+		if (missT >= 0)
+		{
+			// we need a new transform to describe the jump from current missT to new missT
+			missMat = t.invMatrix * threadedMatrices[missT];
+		}
+		newMissT = threadedMatrices.size();
+		threadedMatrices.push_back(missMat);
+
+		// get transform child
+		return buildThreadedBVH(packChild(t.childPrim, t.childIndex), latestTransform, missRef, newMissT);
 	}
-	else // all primitives and empty nodes
-	{
-		// don't need to add a node
-		return ThreadedWrapper{ root, latestTransform };
-	}
+	
+
+	// otherwise we are pointing to a primitive
+	return ThreadedWrapper{ packChild(currentType, currentIndex), latestTransform};
 }
 
 PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 {
 	std::cout << "Loading collection\n";
-	bool useKdop = references.size() > 8;
+	bool useKdop = (references.size() > 8) && !bThreaded;
 	std::vector<LeafItem> leavesAABB;
 	std::vector<KDopLeaf> leavesKdop;
 
@@ -2086,7 +2252,6 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 			break;
 		case KDOP_NODE:
 			//std::cout << "Adding a kdop node\n";
-
 			for (int i = 0; i < KDOP_WIDTH; i++)
 			{
 				min = make_aabb_min(min, kdopHotNodes[index].min_packed[i]);
@@ -2224,7 +2389,6 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	std::vector<tinyobj::shape_t> shapes;
 	std::vector<tinyobj::material_t> materials;
 	chk(tinyobj::LoadObj(&attrib, &shapes, &materials, nullptr, nullptr, filepath.c_str()));
-	//indexCount = VkDeviceSize{ shapes[0].mesh.indices.size() };
 	std::vector<Vertex> vertices{};
 	// Load vertex and index data
 	for (auto& index : shapes[0].mesh.indices) {
@@ -2244,7 +2408,7 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	std::cout << "Loading " << filepath << " with " << (int)vertices.size() / 3 << " triangles\n";
 	std::vector<KDopLeaf> leavesKdop;
 	std::vector<LeafItem> leavesAABB;
-	bool useKdop = vertices.size() > (3 * 16);
+	bool useKdop = (vertices.size() > (3 * 16)) && !bThreaded;
 	for (size_t i = 0; i < vertices.size(); i += 3)
 	{
 		glm::vec3 v0 = vertices[i].pos;
@@ -2293,6 +2457,7 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	PrimType t = EMPTY;
 	if (useKdop)
 	{
+		std::cout << "Loading kdop\n";
 		K14Dop outDop;
 		int binaryKdop = build14DOP(leavesKdop, 0, leavesKdop.size(), outDop);
 		index = flattenKDop(binaryKdop);
@@ -2300,6 +2465,8 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	}
 	else
 	{
+		std::cout << "Loading aabb\n";
+
 		index = buildChildBVH(leavesAABB);
 		t = BVH_NODE;
 	}
@@ -2307,7 +2474,7 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	return packChild(t, index);
 }
 
-PackedRef VK_Wrap::loadSplat(std::string filepath)
+PackedRef VK_Wrap::loadSplatAABB(std::string filepath)
 {
 	std::cout << "Loading " << filepath << "\n";
 	// same as obj loader in terms of BLAS and TLAS
@@ -2431,7 +2598,7 @@ PackedRef VK_Wrap::loadSplat(std::string filepath)
 	std::vector<unsigned char> row(rowStride);
 
 
-	std::vector<KDopLeaf> leaves;
+	std::vector<LeafItem> leaves;
 	for (std::size_t i = 0; i < vertexCount; ++i) {
 		file.read(reinterpret_cast<char*>(row.data()), static_cast<std::streamsize>(row.size()));
 		if (!file) {
@@ -2543,9 +2710,9 @@ PackedRef VK_Wrap::loadSplat(std::string filepath)
 			.materialIndex = matIndex,
 			.halfExtent = halfExtent
 		};
-		K14Dop dop = kdopFromGaussianSplat(center, R, scale, k);
+		//K14Dop dop = kdopFromGaussianSplat(center, R, scale, k);
 
-		/*
+		
 		leaves.push_back(LeafItem{
 			.min = center - halfExtent,
 			.max = center + halfExtent,
@@ -2554,24 +2721,29 @@ PackedRef VK_Wrap::loadSplat(std::string filepath)
 			.index = (int) splats.size()
 			});
 
-		*/
+		/*
 		leaves.push_back(KDopLeaf{
 			.type = PrimType::GAUSSIAN_SPLAT,
 			.index = (int)splats.size(),
 			.center = center,
 			.kDop = dop
 			});
+			*/
 		splats.push_back(gs);
 	}
 
-	K14Dop outDop;
-	int binaryKdop = build14DOP(leaves, 0, leaves.size(), outDop);
+	int binaryAABB = buildChildBVH(leaves);
 
-	return packChild(KDOP_NODE, flattenKDop(binaryKdop));
+	return packChild(BVH_NODE, binaryAABB);
 }
 
-PackedRef VK_Wrap::loadSplat2(std::string filepath)
+PackedRef VK_Wrap::loadSplat(std::string filepath)
 {
+	if (bThreaded)
+	{
+		std::cout << "using the binary AABB loader instead\n";
+		return loadSplatAABB(filepath);
+	}
 	auto leaves = loadSplat_helper(filepath);
 
 	std::cout << "building tree\n";
@@ -3045,7 +3217,7 @@ VkBufferMemoryBarrier2 VK_Wrap::bufferBarrier(
 bool VK_Wrap::getFences()
 {
 	// Sync
-	constexpr uint64_t FENCE_TIMEOUT_NS = 3'000'000'000ull; // 3s
+	constexpr uint64_t FENCE_TIMEOUT_NS = 4'000'000'000ull;
 
 	VkResult waitResult = vkWaitForFences(device, 1, &fences[frameIndex], true, FENCE_TIMEOUT_NS);
 

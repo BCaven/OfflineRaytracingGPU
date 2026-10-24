@@ -1,5 +1,6 @@
 implementing scene;
 
+
 public struct tbvhNode
 {
     float3 min;

@@ -191,6 +191,7 @@ public:
 	// auto render frames
 	int numImagesPerSequence = 1;
 
+	bool bThreaded = true;
 
 	VK_Wrap() {};
 	~VK_Wrap() 
@@ -337,7 +338,23 @@ public:
 
 	int buildChildBVH(std::vector<LeafItem>& leaves);
 
-	ThreadedWrapper buildThreadedBVH(PackedRef root, int transformIndex = -1);
+	int registerMatrix(glm::mat4 mat);
+
+	int makeHitTransform(
+		const glm::mat4& sourceWorldToLocal,
+		const glm::mat4& destinationWorldToLocal);
+	int makeMissTransform(
+		const glm::mat4& sourceWorldToLocal,
+		const glm::mat4& destinationWorldToLocal);
+
+	ThreadedWrapper_explicit buildThreadedBVH3(
+		PackedRef hitRef,
+		const  glm::mat4& currentWorldToLocal,
+		PackedRef missRef,
+		const  glm::mat4& missWorldToLocal);
+
+	ThreadedWrapper buildThreadedBVH(PackedRef hitRef, int hitT, PackedRef missRef, int missT);
+	ThreadedWrapper buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm::vec3 boxMax, PackedRef missRef, int missT);
 
 	PackedRef loadCollection(std::vector<PackedRef> references);
 
@@ -345,9 +362,9 @@ public:
 
 	PackedRef loadObj(std::string filepath, unsigned int materialIndex);
 
-	PackedRef loadSplat(std::string filepath);
+	PackedRef loadSplatAABB(std::string filepath);
 
-	PackedRef loadSplat2(std::string filepath);
+	PackedRef loadSplat(std::string filepath);
 
 	std::vector<KDopLeaf> loadSplat_helper(std::string filepath);
 

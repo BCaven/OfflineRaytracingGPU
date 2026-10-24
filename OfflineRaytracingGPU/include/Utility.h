@@ -12,7 +12,7 @@ constexpr int SH_CHANNEL_COUNT = 3;
 constexpr int SH_FLOAT_COUNT = SH_COUNT * SH_CHANNEL_COUNT;
 constexpr int SH_REST_FLOAT_COUNT = SH_FLOAT_COUNT - SH_CHANNEL_COUNT;
 constexpr int SH_PACKED_VEC4_COUNT = SH_FLOAT_COUNT / 4;
-
+constexpr unsigned int SENTINEL_REF = 0x0FFFFFFFu;
 static_assert(SH_FLOAT_COUNT % 4 == 0,
 	"Spherical harmonic coefficients must pack into vec4 attributes");
 
@@ -95,6 +95,12 @@ struct ThreadedWrapper
 {
 	PackedRef retNode;
 	int transformIndex;
+};
+
+struct ThreadedWrapper_explicit
+{
+	PackedRef retNode;
+	glm::mat4 entryWorldToLocal;
 };
 
 struct bvhChild
@@ -511,7 +517,7 @@ static inline K14Dop kdopFromSphere(const Sphere& s)
 
 static inline PackedRef packChild(PrimType type, int index)
 {
-	return (unsigned int(type) << 28) | (unsigned int(index) & 0x0FFFFFFFu);
+	return (unsigned int(type) << 28) | (unsigned int(index) & SENTINEL_REF);
 }
 
 static inline int unpackIndex(unsigned int packed)

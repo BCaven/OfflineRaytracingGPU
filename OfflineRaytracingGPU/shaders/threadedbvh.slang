@@ -14,7 +14,7 @@ Appealing since it would also remove the transform stack and allow for arbitrari
 
 */
 
-bool transformRay(inout Ray ray, float4x4 invTransform, out float tScale)
+bool transformRay(inout Ray ray, float4x4 invTransform, inout float tScale)
 {
     //
     float3 localOrigin = mul(invTransform, float4(ray.origin, 1)).xyz;
@@ -33,22 +33,12 @@ bool transformRay(inout Ray ray, float4x4 invTransform, out float tScale)
     float3 dir = localDirection / lenDir;
     ray.origin = localOrigin;
     ray.direction = dir;
-    tScale = 1 / lenDir;
+    tScale = tScale / lenDir;
     return true;
 }
 
-
-Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType rootType, uint threadLen)
+Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType rootType)
 {
-    /*
-    Each transform in the StructuredBuffer is world->currentSpace
-
-    Problem: support for collections of instances means we need to handle transforms by multiplying the current state by
-    a matrix that undos the transform we just left
-
-    
-        
-    */
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
 
@@ -57,20 +47,20 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
 
     Ray currentRay = startRay;
     float4x4 currentTransform = identity4x4();
+    float4x4 accumulatedTransform = identity4x4();
     float scaleT = 1;
-    uint lastPackedMiss = -1;
-    // otherwise traverse the threaded nodes
-    bool quit = index >= threadLen;
-    while (index < threadLen)
+    while (index < INDEX_MAX)
     {
         if (nodeType != PrimType::THREADED_NODE)
         {
             // somehow we pursued a non-threaded node
+            float3x3 normalMat = transpose((float3x3)accumulatedTransform);
+            bool primHit = ProcessPrimitive(nodeType, index, currentRay, closest, normalMat, scaleT);
             return closest;
         }
 
         // process index collision
-        // if it hit, process the child
+        // if it hit and is closest, process the child
         // if it missed, make the index the skip index
 
         tbvhNode current = threadedNodes[index];
@@ -78,26 +68,33 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
         bool bHit = false;
         if (hit < closest.t) // hit and closest
         {
+            uint childIdx = unpackIndex(current.packedChild);
+            PrimType childType = unpackType(current.packedChild);
             bHit = true;
-            if (current.hitTransform >= 0)
-            {
-                // load the hit transform and apply it
-                currentTransform = transformMats[current.hitTransform];
-                transformRay(currentRay, currentTransform, scaleT);
-            }
-            // update current index/type and continue
-            index = unpackIndex(current.packedChild);
-            nodeType = unpackType(current.packedChild);
-            lastPackedMiss = current.packedMiss;
 
-            // it might be easier to just check for primitives here
-            if (nodeType != PrimType::THREADED_NODE)
+            if (childType != PrimType::THREADED_NODE)
             {
-                // process collision and exit
-                float3x3 normalMat = transpose((float3x3)currentTransform);
-                bHit = ProcessPrimitive(nodeType, index, currentRay, closest, normalMat, scaleT);
+                // temporary frame: live ray/accumulated stay in this node's box space
+                Ray r = currentRay; float s = scaleT; float4x4 acc = accumulatedTransform;
+                if (current.hitTransform >= 0)
+                {
+                    float4x4 T = transformMats[current.hitTransform];
+                    transformRay(r, T, s);
+                    acc = mul(T, acc);
+                }
+                ProcessPrimitive(childType, childIdx, r, closest, transpose((float3x3)acc), s);
+                bHit = false; // treat as end of chain -> miss edge
             }
-
+            else
+            {
+                if (current.hitTransform >= 0)
+                {
+                    currentTransform = transformMats[current.hitTransform];
+                    accumulatedTransform = mul(currentTransform, accumulatedTransform);
+                    transformRay(currentRay, currentTransform, scaleT);
+                }
+                index = childIdx; nodeType = childType;
+            }
         }
         if (!bHit) // hit and not closest or missed
         {
@@ -106,8 +103,8 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
             {
                 // need to actually load that transform
                 currentTransform = transformMats[current.missTransform];
-                float4x4 invT = inverseAffine(currentTransform);
-                transformRay(currentRay, invT, scaleT);
+                accumulatedTransform = mul(currentTransform, accumulatedTransform);
+                transformRay(currentRay, currentTransform, scaleT);
             }
             index = unpackIndex(current.packedMiss);
             nodeType = unpackType(current.packedMiss);        

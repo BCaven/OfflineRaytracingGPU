@@ -1,5 +1,8 @@
 implementing scene;
 
+public static const uint UINT_MAX = 4294967295;
+public static const uint INDEX_MAX = 0x0FFFFFFFu;
+
 public static const float FLT_MAX = 3.40282346638528859812e+38;
 public static const float EPSILON = 1e-4;
 public static const float TWO_PI = 6.2831853;
@@ -9,7 +12,7 @@ public static const float GLASS_F0_SCALAR = 0.04;
 public static const int KDOP_WIDTH = 8;
 
 static const uint STACK_SIZE = 64;
-static const uint TRANSFORM_STACK_SIZE = 8;
+static const uint TRANSFORM_STACK_SIZE = 16;
 
 static const uint SHORT_STACK_SIZE = 15;
 static const uint RESTART_TRAIL_SIZE = 512; // this should be the max depth of the bvh

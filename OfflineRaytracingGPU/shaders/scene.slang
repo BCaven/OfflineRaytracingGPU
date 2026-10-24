@@ -13,6 +13,8 @@ __include primitives;
 
 __include shortstackKDOP;
 
+__include threadedbvh;
+
 __include bvh;
 
 
@@ -56,8 +58,8 @@ public float4 ray_spectral(Ray ray, uint sceneRoot, float3 camDir, bool firstBou
     -0.9689, 1.8758, 0.0415,
      0.0557, -0.2040, 1.0570
     );
-
-    Intersection intersection = intersect_scene_wide_dfs(ray, rootIndex, rootType);
+    // later make these interchangable for testing
+    Intersection intersection = intersect_scene_threaded(ray, rootIndex, rootType); //intersect_scene_wide_dfs(ray, rootIndex, rootType); //
     if (!valid_intersection(intersection))
     {
         float skySpectral = rgb_to_spectral(sky_color(ray, backgroundColor), ray.wavelength);

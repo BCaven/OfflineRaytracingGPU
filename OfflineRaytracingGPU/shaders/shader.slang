@@ -14,6 +14,8 @@ import scene;
 [shader("vertex")]
 VSOutput main(VSInput input, uint instanceIndex : SV_VulkanInstanceID)
 {
+
+    // TODO replace this with a blit
     VSOutput output;
     output.Pos = float4(input.Pos.xyz, 1.0);
     return output;

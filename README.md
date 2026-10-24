@@ -34,6 +34,16 @@ Arrow keys `right` and `left` move through time. \
 
 This section does not cover every aspect of the engine. (e.g. Triangle, and Sphere intersections will not be covered)
 
+## Threaded traversal
+
+Early experiments with threaded bvh traversal yielded the following active frame times:
+
+| model         | threaded | wide kdop |
+| ------------- | -------- | --------- |
+| Beholder 3m   | 2.21ms   | times out |
+| Beholder 1.7m | 1.19ms   | 23.67ms   |
+
+
 ## Transforms
 
 Transforms are the easiest way to make instances of BLAS. Transforms have a single child that can be any node type (Inner node, Primitive, other transform, etc.).\
