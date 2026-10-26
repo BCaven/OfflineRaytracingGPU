@@ -3,6 +3,7 @@ implementing scene;
 __include threadedbvh_header;
 
 public StructuredBuffer<tbvhNode> threadedNodes;
+public StructuredBuffer<kdopThreaded> threadedKDopNodes;
 
 public StructuredBuffer<float4x4> transformMats;
 
@@ -13,6 +14,36 @@ TODO: do a performance benchmark comparing a stackless traversal to full stack D
 Appealing since it would also remove the transform stack and allow for arbitrarily long transform chains
 
 */
+
+float2 kdop_bounds(Ray ray, float kdopmin[7], float kdopmax[7])
+{
+    float tEntry = -FLT_MAX;
+    float tExit = FLT_MAX;
+    [unroll]
+    for (int i = 0; i < 7; i++)
+    {
+        float denom = dot(ray.direction, KDOP_DIRECTIONS[i]);
+        float o = dot(ray.origin, KDOP_DIRECTIONS[i]);
+        if (abs(denom) < EPSILON)
+        {
+            if (o < kdopmin[i] || o > kdopmax[i])
+            {
+                return float2(FLT_MAX);
+            }
+            continue;
+        }
+        float tA = (kdopmin[i] - o) / denom;
+        float tB = (kdopmax[i] - o) / denom;
+        tEntry = max(tEntry, min(tA, tB));
+        tExit = min(tExit, max(tA, tB));
+        if (tEntry > tExit || tExit < EPSILON) return float2(FLT_MAX);
+    }
+
+    float tHit = max(EPSILON, tEntry);
+
+    return float2(tHit, tExit);
+}
+
 
 bool transformRay(inout Ray ray, float4x4 invTransform, inout float tScale)
 {
@@ -37,6 +68,11 @@ bool transformRay(inout Ray ray, float4x4 invTransform, inout float tScale)
     return true;
 }
 
+bool isThreaded(PrimType t)
+{
+    return t == PrimType::THREADED_NODE || t == PrimType::THREADED_KDOP;
+}
+
 Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType rootType)
 {
     Intersection closest = no_intersection();
@@ -51,64 +87,100 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
     float scaleT = 1;
     while (index < INDEX_MAX)
     {
-        if (nodeType != PrimType::THREADED_NODE)
+        if (!isThreaded(nodeType))
         {
             // somehow we pursued a non-threaded node
             float3x3 normalMat = transpose((float3x3)accumulatedTransform);
             bool primHit = ProcessPrimitive(nodeType, index, currentRay, closest, normalMat, scaleT);
             return closest;
         }
-
-        // process index collision
-        // if it hit and is closest, process the child
-        // if it missed, make the index the skip index
-
-        tbvhNode current = threadedNodes[index];
-        float hit = scaleT * intersect_aabb(currentRay, current.min, current.max);
-        bool bHit = false;
-        if (hit < closest.t) // hit and closest
+        else if (nodeType == PrimType::THREADED_KDOP)
         {
-            uint childIdx = unpackIndex(current.packedChild);
-            PrimType childType = unpackType(current.packedChild);
-            bHit = true;
+            // process index collision
+            // if it hit and is closest, process the child
+            // if it missed, make the index the skip index
 
-            if (childType != PrimType::THREADED_NODE)
+            kdopThreaded current = threadedKDopNodes[index];
+            uint nextIdx = unpackIndex(current.packedMiss);
+            PrimType nextType = unpackType(current.packedMiss);
+
+            float2 rawHit = kdop_bounds(currentRay, current.min, current.max);
+   
+            bool hit = rawHit.x != FLT_MAX && scaleT * rawHit.x < closest.t;
+
+            if (hit) // hit and closest
             {
-                // temporary frame: live ray/accumulated stay in this node's box space
-                Ray r = currentRay; float s = scaleT; float4x4 acc = accumulatedTransform;
-                if (current.hitTransform >= 0)
+                // update closest
+                //closest.t = scaleT * rawHit.x;
+                // process children
+                uint childIdx = unpackIndex(current.packedChild);
+                PrimType childType = unpackType(current.packedChild);
+
+                if (isThreaded(childType))
                 {
-                    float4x4 T = transformMats[current.hitTransform];
-                    transformRay(r, T, s);
-                    acc = mul(T, acc);
+                    nextIdx = childIdx; nextType = childType;
                 }
-                ProcessPrimitive(childType, childIdx, r, closest, transpose((float3x3)acc), s);
-                bHit = false; // treat as end of chain -> miss edge
+                else
+                {
+                    Ray r = currentRay; float s = scaleT;
+                    ProcessPrimitive(childType, childIdx, r, closest, identity3x3(), s);
+
+                    // get sibling too
+                    uint sibIdx = unpackIndex(current.packedSibling);
+                    PrimType sibType = unpackType(current.packedSibling);
+
+                    if (isThreaded(sibType))
+                    {
+                        // continue into the second child (a subtree)
+                        nextIdx = sibIdx; nextType = sibType;
+                    }
+                    else
+                    {
+                        // second child is also a primitive: process it, then fall through to miss
+                        Ray r = currentRay; float s = scaleT;
+                        ProcessPrimitive(sibType, sibIdx, r, closest, identity3x3(), s);
+                    }
+                }
             }
-            else
+            index = nextIdx;
+            nodeType = nextType;
+        }
+        else
+        {
+
+            // process index collision
+            // if it hit and is closest, process the child
+            // if it missed, make the index the skip index
+
+            tbvhNode current = threadedNodes[index];
+            float hit = scaleT * intersect_aabb(currentRay, current.min, current.max);
+            bool bHit = false;
+            if (hit < closest.t) // hit and closest
             {
-                if (current.hitTransform >= 0)
+                //closest.t = hit;
+                uint childIdx = unpackIndex(current.packedChild);
+                PrimType childType = unpackType(current.packedChild);
+                bHit = true;
+
+                if (childType != PrimType::THREADED_NODE)
                 {
-                    currentTransform = transformMats[current.hitTransform];
-                    accumulatedTransform = mul(currentTransform, accumulatedTransform);
-                    transformRay(currentRay, currentTransform, scaleT);
+                    // temporary frame: live ray/accumulated stay in this node's box space
+                    Ray r = currentRay; float s = scaleT;
+                    ProcessPrimitive(childType, childIdx, r, closest, identity3x3(), s);
+                    bHit = false; // treat as end of chain -> miss edge
                 }
-                index = childIdx; nodeType = childType;
+                else
+                {
+                    index = childIdx; nodeType = childType;
+                }
+            }
+            if (!bHit) // hit and not closest or missed
+            {
+                index = unpackIndex(current.packedMiss);
+                nodeType = unpackType(current.packedMiss);
             }
         }
-        if (!bHit) // hit and not closest or missed
-        {
-            // modify current ray if needed and go to miss node
-            if (current.missTransform >= 0)
-            {
-                // need to actually load that transform
-                currentTransform = transformMats[current.missTransform];
-                accumulatedTransform = mul(currentTransform, accumulatedTransform);
-                transformRay(currentRay, currentTransform, scaleT);
-            }
-            index = unpackIndex(current.packedMiss);
-            nodeType = unpackType(current.packedMiss);        
-        }
+        
     }
     return closest;	
 }

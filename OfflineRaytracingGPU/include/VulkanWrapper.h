@@ -175,6 +175,7 @@ public:
 	std::vector<K14DopNodeCold> kdopColdNodes;
 	std::vector< tbvhNode> threadedNodes;
 	std::vector<glm::mat4x4> threadedMatrices;
+	std::vector<kdopThreaded> threadedKDopNodes;
 	CameraWrapper camera;
 	ShaderData shaderData{};
 
@@ -347,13 +348,6 @@ public:
 		const glm::mat4& sourceWorldToLocal,
 		const glm::mat4& destinationWorldToLocal);
 
-	ThreadedWrapper_explicit buildThreadedBVH3(
-		PackedRef hitRef,
-		const  glm::mat4& currentWorldToLocal,
-		PackedRef missRef,
-		const  glm::mat4& missWorldToLocal);
-
-	ThreadedWrapper buildThreadedBVH(PackedRef hitRef, int hitT, PackedRef missRef, int missT);
 	ThreadedWrapper buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm::vec3 boxMax, PackedRef missRef, int missT);
 
 	PackedRef loadCollection(std::vector<PackedRef> references);
@@ -363,6 +357,9 @@ public:
 	PackedRef loadObj(std::string filepath, unsigned int materialIndex);
 
 	PackedRef loadSplatAABB(std::string filepath);
+
+	PackedRef loadSplatBinary(std::string filepath);
+
 
 	PackedRef loadSplat(std::string filepath);
 

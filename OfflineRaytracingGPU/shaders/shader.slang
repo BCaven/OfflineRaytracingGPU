@@ -1,11 +1,3 @@
-/*
-TODO:
-- Make BVH primitive agnostic
-- rewrite function headers to be better separated
-
-
-*/
-
 #include "shader_header.slang"
 
 import scene;
@@ -14,8 +6,6 @@ import scene;
 [shader("vertex")]
 VSOutput main(VSInput input, uint instanceIndex : SV_VulkanInstanceID)
 {
-
-    // TODO replace this with a blit
     VSOutput output;
     output.Pos = float4(input.Pos.xyz, 1.0);
     return output;
@@ -27,6 +17,8 @@ ShaderData shaderData;
 [shader("fragment")]
 float4 main(VSOutput input)
 {
+    // TODO replace this with a blit?
+
     float2 historyUV = input.Pos.xy / shaderData.windowMax; // normalized, for Sample()
     float4 historyColor = previousFrame.Sample(historyUV);
 

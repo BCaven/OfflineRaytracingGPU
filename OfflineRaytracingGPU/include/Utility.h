@@ -78,6 +78,8 @@ enum PrimType : unsigned int
 	BVH_NODE,
 	KDOP_NODE,
 	THREADED_NODE,
+	THREADED_KDOP,
+	KDOP_NODE_BINARY,
 	EMPTY
 };
 
@@ -89,6 +91,15 @@ struct tbvhNode
 	PackedRef packedMiss;
 	int missTransform;
 	int hitTransform;
+};
+
+struct kdopThreaded
+{
+	float min[7];
+	float max[7];
+	PackedRef packedChild;
+	PackedRef packedMiss;
+	PackedRef packedSibling;
 };
 
 struct ThreadedWrapper
@@ -124,8 +135,8 @@ struct K14Dop
 };
 struct KDopNode // the version that will eventually get loaded on the GPU
 {
-	unsigned int packedIndexType_left;
-	unsigned int packedIndexType_right;
+	PackedRef packedIndexType_left;
+	PackedRef packedIndexType_right;
 
 	K14Dop kDop_left;
 	K14Dop kDop_right;

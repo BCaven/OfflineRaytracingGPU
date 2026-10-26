@@ -736,7 +736,7 @@ PackedRef threaded(VK_Wrap& wrapper)
 				.abbe = 7,
 			}
 	};
-
+	/*
 	float radius = 8.5;
 	float offset = 0; //radius / 2;
 	unsigned int matIndex = 0;
@@ -802,7 +802,7 @@ PackedRef threaded(VK_Wrap& wrapper)
 	);
 	auto prismCollection = wrapper.loadCollection(prisms);
 
-
+	*/
 	wrapper.camera = CameraWrapper{
 		.origin = glm::vec3(0, 0.75, 1),
 		.fov = 20
@@ -811,10 +811,11 @@ PackedRef threaded(VK_Wrap& wrapper)
 	wrapper.shaderData.backgroundColor = sky;
 
 	//auto aabbSplat = wrapper.loadSplatAABB("assets/tomatoes_10x_180.ply");
-	auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
-	auto suzanne = wrapper.loadObj("assets/suzanne.obj", 0);
+	auto binarySplat = wrapper.loadSplatBinary("assets/tomatoes_10x_180.ply");
+	//auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
+	//auto suzanne = wrapper.loadObj("assets/suzanne.obj", 0);
 
-	return beholder; //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
+	return binarySplat; //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)

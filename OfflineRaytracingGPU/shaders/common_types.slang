@@ -123,6 +123,8 @@ public enum PrimType : uint
     BVH_NODE,
     KDOP_NODE,
     THREADED_NODE,
+    THREADED_KDOP,
+    KDOP_NODE_BINARY,
     EMPTY
 };
 

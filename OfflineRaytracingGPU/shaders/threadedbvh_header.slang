@@ -7,6 +7,14 @@ public struct tbvhNode
     float3 max;
     uint packedChild;
     uint packedMiss;
-    int missTransform;
-    int hitTransform;
+    uint packedSibling;
 }
+
+public struct kdopThreaded
+{
+    float min[7];
+    float max[7];
+    uint packedChild;
+    uint packedMiss;
+    uint packedSibling;
+};

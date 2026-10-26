@@ -5,7 +5,8 @@ Interactive progressive spectral Monte Carlo GPU path tracer written in Slang an
 
 # Controls and terminology
 
-This path tracer is interactive. mouse + WASD move the camera but the image only converges when the scene is the same as the previous frame. Each frame processes a single bounce, allowing for responsive temporal accumulation.
+This path tracer is interactive. \
+Mouse + WASD move the camera but the image only converges when the scene is the same as the previous frame. Each frame processes a single bounce, allowing for responsive temporal accumulation.
 
 Camera movement uses FPS controls: mouse + `WASD` with `Q` and `E` for altitude control. \
 Arrow keys `right` and `left` move through time. \
@@ -43,6 +44,7 @@ Early experiments with threaded bvh traversal yielded the following active frame
 | Beholder 3m   | 2.21ms   | times out |
 | Beholder 1.7m | 1.19ms   | 23.67ms   |
 
+These results are for a single bounce, which is all that is computed per frame.
 
 ## Transforms
 
