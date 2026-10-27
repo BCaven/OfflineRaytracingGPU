@@ -256,10 +256,10 @@ void VK_Wrap::initVulkan()
 	volkLoadInstance(instance);
 	// Device
 	chk(vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr));
-	std::cout << "Found " << deviceCount << " Devices\n";
+	//std::cout << "Found " << deviceCount << " Devices\n";
 	devices.resize(deviceCount);
 	chk(vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()));
-	std::cout << "Available devices:\n";
+	//std::cout << "Available devices:\n";
 	for (int i = 0; i < deviceCount; i++)
 	{
 		const auto& device = devices[i];
@@ -272,15 +272,15 @@ void VK_Wrap::initVulkan()
 		};
 
 		vkGetPhysicalDeviceProperties2(device, &tmpProperties);
-		std::cout << "----------------------------------\n";
-		std::cout << "\t" << i << " : " << tmpProperties.properties.deviceName << "\n";
-		printf("\tUUID: %02X\n", idProps.deviceUUID);
-		printf("\tLUID: %02X\n", idProps.deviceLUID);
+		//std::cout << "----------------------------------\n";
+		//std::cout << "\t" << i << " : " << tmpProperties.properties.deviceName << "\n";
+		//printf("\tUUID: %02X\n", idProps.deviceUUID);
+		//printf("\tLUID: %02X\n", idProps.deviceLUID);
 	}
 	deviceIndex = std::min(deviceIndex, deviceCount - 1);// oops gpu you dont actually have
 	VkPhysicalDeviceProperties2 deviceProperties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 	vkGetPhysicalDeviceProperties2(devices[deviceIndex], &deviceProperties);
-	std::cout << "Selected device: " << deviceIndex << " : " << deviceProperties.properties.deviceName << "\n";
+	//std::cout << "Selected device: " << deviceIndex << " : " << deviceProperties.properties.deviceName << "\n";
 	// Find a queue family for graphics
 	uint32_t queueFamilyCount{ 0 };
 	vkGetPhysicalDeviceQueueFamilyProperties(devices[deviceIndex], &queueFamilyCount, nullptr);
@@ -2008,6 +2008,14 @@ int VK_Wrap::registerMatrix(glm::mat4 mat)
 	threadedMatrices.push_back(mat);
 	return threadedMatrices.size() - 1;
 }
+
+static bool isPrimRef(PackedRef r)
+{
+	PrimType t = unpackType(r);
+	return t != PrimType::BVH_NODE && t != PrimType::KDOP_NODE_BINARY
+		&& t != PrimType::TRANSFORM;
+}
+
 ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm::vec3 boxMax,
 	PackedRef missRef, int missT)
 {
@@ -2055,31 +2063,47 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 	if (unpackType(ref) == PrimType::BVH_NODE)
 	{
 		int ci = unpackIndex(ref);
-		if (ci >= bvhNodes.size()) 
-		{ 
-			// hey that is an invalid node!
+		if (ci >= bvhNodes.size())
 			std::cout << "Invalid BVH node when building threaded bvh\n";
-		}
 		const bvhNode& n = bvhNodes[ci];
 
-		auto right = buildThreadedBVH2(packChild(n.right.type, n.right.index),
-			n.right.min, n.right.max, missRef, contentMissT);
+		PackedRef lRef = packChild(n.left.type, n.left.index);
+		PackedRef rRef = packChild(n.right.type, n.right.index);
+		const auto* lBox = &n.left;
+		const auto* rBox = &n.right;
 
-		int toRightT = right.transformIndex;
+		// a primitive must come first: its "next" is the sibling, which is stored in this node.
+		// a subtree can only exit to a node, never to a bare primitive.
+		if (isPrimRef(rRef) && !isPrimRef(lRef))
+		{
+			std::swap(lRef, rRef);
+			std::swap(lBox, rBox);
+		}
 
+		tbvhNode node{};
+		node.min = make_aabb_min(n.left.min, n.right.min);
+		node.max = make_aabb_max(n.left.max, n.right.max);
+		node.packedMiss = missRef;
+		node.packedSibling = SENTINEL_REF; // your "none" sentinel
 
-		auto left = buildThreadedBVH2(packChild(n.left.type, n.left.index),
-			n.left.min, n.left.max, right.retNode, toRightT);
+		if (isPrimRef(lRef))
+		{
+			node.packedChild = lRef;                       // inline primitive
+			node.packedSibling = isPrimRef(rRef)
+				? rRef                                     // prim + prim: both inline
+				: buildThreadedBVH2(rRef, glm::vec3(0), glm::vec3(0), missRef, -1).retNode;        // prim + subtree: exits to our miss
+		}
+		else
+		{
+			// subtree + subtree: left exits into right, right exits to our miss
+			PackedRef right = buildThreadedBVH2(rRef, glm::vec3(0), glm::vec3(0), missRef, -1).retNode;
+			PackedRef left = buildThreadedBVH2(lRef, glm::vec3(0), glm::vec3(0), right, -1).retNode;
+			node.packedChild = left;
+		}
 
 		int idx = (int)threadedNodes.size();
-		threadedNodes.push_back(tbvhNode{
-			.min = make_aabb_min(n.left.min, n.right.min),
-			.max = make_aabb_max(n.left.max, n.right.max),
-			.packedChild = left.retNode,
-			.packedMiss = missRef,
-			.missTransform = contentMissT,
-			.hitTransform = left.transformIndex });
-		return { packChild(PrimType::THREADED_NODE, idx), hitT };
+		threadedNodes.push_back(node);
+		return { packChild(PrimType::THREADED_NODE, idx), -1 };
 	}
 	else if (unpackType(ref) == PrimType::KDOP_NODE_BINARY)
 	{
@@ -2140,13 +2164,13 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 	}
 
 	// primitive: its own node, tested in the *box* space, so miss stays relative to missT
+	std::cout << "HEY WE HIT A PRIMITIVE!\n";
 	int idx = (int)threadedNodes.size();
 	threadedNodes.push_back(tbvhNode{
 		.min = boxMin, .max = boxMax,
 		.packedChild = ref,
 		.packedMiss = missRef,
-		.missTransform = missT,
-		.hitTransform = hitT });
+		.packedSibling = SENTINEL_REF});
 	return { packChild(PrimType::THREADED_NODE, idx), -1 };
 }
 
@@ -2285,7 +2309,7 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 
 			min = splats[index].center - splats[index].halfExtent;
 			max = splats[index].center + splats[index].halfExtent;
-			dop = kdopFromGaussianSplat(splats[index].center, splats[index].rotation, 1.f / glm::sqrt(splats[index].invScale2), 0.01);
+			dop = kdopFromGaussianSplat(splats[index].center, glm::mat3_cast(splats[index].rotation), 1.f / glm::sqrt(splats[index].invScale2), 0.01);
 			break;
 		case TRANSFORM:
 			///std::cout << "Adding a transform node\n";
@@ -2415,7 +2439,7 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	std::cout << "Loading " << filepath << " with " << (int)vertices.size() / 3 << " triangles\n";
 	std::vector<KDopLeaf> leavesKdop;
 	std::vector<LeafItem> leavesAABB;
-	bool useKdop = (vertices.size() > (3 * 16));
+	bool useKdop = false; //(vertices.size() > (3 * 16));
 	for (size_t i = 0; i < vertices.size(); i += 3)
 	{
 		glm::vec3 v0 = vertices[i].pos;
@@ -2724,7 +2748,7 @@ PackedRef VK_Wrap::loadSplatAABB(std::string filepath)
 		materials.push_back(mat);
 		GaussianSplat gs{
 			.center = center,
-			.rotation = R,
+			.rotation = rotation,
 			.invScale2 = invScale2,
 			.alpha = alpha,
 			.materialIndex = matIndex,
@@ -2979,7 +3003,7 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
 
 		GaussianSplat gs{
 			.center = center,
-			.rotation = R,
+			.rotation = rotation,
 			.invScale2 = invScale2,
 			.alpha = alpha,
 			.materialIndex = (unsigned int)(baseMat + i),

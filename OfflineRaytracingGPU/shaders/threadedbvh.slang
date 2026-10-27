@@ -153,32 +153,45 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
             // if it missed, make the index the skip index
 
             tbvhNode current = threadedNodes[index];
+
+            uint nextIdx = unpackIndex(current.packedMiss);
+            PrimType nextType = unpackType(current.packedMiss);
+
             float hit = scaleT * intersect_aabb(currentRay, current.min, current.max);
             bool bHit = false;
             if (hit < closest.t) // hit and closest
             {
-                //closest.t = hit;
                 uint childIdx = unpackIndex(current.packedChild);
                 PrimType childType = unpackType(current.packedChild);
-                bHit = true;
 
-                if (childType != PrimType::THREADED_NODE)
+                if (isThreaded(childType))
                 {
-                    // temporary frame: live ray/accumulated stay in this node's box space
-                    Ray r = currentRay; float s = scaleT;
-                    ProcessPrimitive(childType, childIdx, r, closest, identity3x3(), s);
-                    bHit = false; // treat as end of chain -> miss edge
+                    nextIdx = childIdx; nextType = childType;
                 }
                 else
                 {
-                    index = childIdx; nodeType = childType;
+                    Ray r = currentRay; float s = scaleT;
+                    ProcessPrimitive(childType, childIdx, r, closest, identity3x3(), s);
+
+                    // get sibling too
+                    uint sibIdx = unpackIndex(current.packedSibling);
+                    PrimType sibType = unpackType(current.packedSibling);
+
+                    if (isThreaded(sibType))
+                    {
+                        // continue into the second child (a subtree)
+                        nextIdx = sibIdx; nextType = sibType;
+                    }
+                    else
+                    {
+                        // second child is also a primitive: process it, then fall through to miss
+                        Ray r = currentRay; float s = scaleT;
+                        ProcessPrimitive(sibType, sibIdx, r, closest, identity3x3(), s);
+                    }
                 }
             }
-            if (!bHit) // hit and not closest or missed
-            {
-                index = unpackIndex(current.packedMiss);
-                nodeType = unpackType(current.packedMiss);
-            }
+            index = nextIdx;
+            nodeType = nextType;
         }
         
     }

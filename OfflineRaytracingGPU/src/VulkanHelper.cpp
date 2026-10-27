@@ -810,12 +810,14 @@ PackedRef threaded(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	//auto aabbSplat = wrapper.loadSplatAABB("assets/tomatoes_10x_180.ply");
-	auto binarySplat = wrapper.loadSplatBinary("assets/tomatoes_10x_180.ply");
+	auto aabbSplat = wrapper.loadSplatAABB("assets/tomatoes_10x_180.ply");
+	//auto aabbSplat = wrapper.loadSplatAABB("assets/readingroom_1x_180.ply");
+	//auto binarySplat = wrapper.loadSplatBinary("assets/tomatoes_10x_180.ply");
+	//auto normalSplat = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
 	//auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
 	//auto suzanne = wrapper.loadObj("assets/suzanne.obj", 0);
 
-	return binarySplat; //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
+	return aabbSplat; //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)

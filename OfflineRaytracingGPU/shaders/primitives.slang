@@ -18,6 +18,34 @@ public RWStructuredBuffer<Ray> rayQueueA;
 public RWStructuredBuffer<Ray> rayQueueB;
 public RWStructuredBuffer<uint> counters;
 
+float3x3 quatToMat(float4 quatAsFloat4)
+{
+    // copied from glm::mat3_cast
+    float4 q = quatAsFloat4.xyzw;
+    float3x3 Result;
+    float qxx = q.x * q.x;
+    float qyy = q.y * q.y;
+    float qzz = q.z * q.z;
+    float qxz = q.x * q.z;
+    float qxy = q.x * q.y;
+    float qyz = q.y * q.z;
+    float qwx = q.w * q.x;
+    float qwy = q.w * q.y;
+    float qwz = q.w * q.z;
+
+    Result[0][0] = 1. - 2. * (qyy + qzz);
+    Result[0][1] = 2. * (qxy + qwz);
+    Result[0][2] = 2. * (qxz - qwy);
+
+    Result[1][0] = 2. * (qxy - qwz);
+    Result[1][1] = 1. - 2. * (qxx + qzz);
+    Result[1][2] = 2. * (qyz + qwx);
+
+    Result[2][0] = 2. * (qxz + qwy);
+    Result[2][1] = 2. * (qyz - qwx);
+    Result[2][2] = 1. - 2. * (qxx + qyy);
+    return transpose(Result); // TODO: make the original assignment already be transposed
+}
 
 public Ray makeRay(uint2 rayCoord, float3 origin, float3 direction)
 {
@@ -457,7 +485,9 @@ Intersection intersect_splat(const Ray ray, GaussianSplat gs, float closest_t)
     float3 w = ray.direction;
     float3 X = ray.origin - gs.center;
 
-    float3x3 Rt = transpose(gs.rotation);
+    float3x3 rot = quatToMat(gs.rotation);
+
+    float3x3 Rt = transpose(rot);
 
     float3 Xl = mul(Rt, X);
     float3 wl = mul(Rt, w);
@@ -485,7 +515,7 @@ Intersection intersect_splat(const Ray ray, GaussianSplat gs, float closest_t)
     if (roulette >= alpha) return no_intersection();
 
     float3 localGradient = dl * invScale2;
-    float3 normal = normalize(mul(gs.rotation, localGradient));
+    float3 normal = normalize(mul(rot, localGradient));
 
     return Intersection(normal, mean_t, gs.materialIndex);
 }

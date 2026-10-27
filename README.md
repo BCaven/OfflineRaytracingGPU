@@ -37,12 +37,13 @@ This section does not cover every aspect of the engine. (e.g. Triangle, and Sphe
 
 ## Threaded traversal
 
-Early experiments with threaded bvh traversal yielded the following active frame times:
+Early experiments with threaded bvh traversal yielded the following active frame times: \
+All tests done on a RTX 4090 at 1280x720.
 
-| model         | threaded | wide kdop |
-| ------------- | -------- | --------- |
-| Beholder 3m   | 2.21ms   | times out |
-| Beholder 1.7m | 1.19ms   | 23.67ms   |
+| model         | threaded aabb | threaded kdop | wide kdop stack |
+| ------------- | ------------- | ------------- |---------------- |
+| Beholder 3m   | 2.21ms        |               | times out       |
+| Beholder 1.7m | 1.19ms        |               | 23.67ms         |
 
 These results are for a single bounce, which is all that is computed per frame.
 

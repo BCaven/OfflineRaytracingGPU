@@ -89,8 +89,7 @@ struct tbvhNode
 	glm::vec3 max;
 	PackedRef packedChild;
 	PackedRef packedMiss;
-	int missTransform;
-	int hitTransform;
+	PackedRef packedSibling;
 };
 
 struct kdopThreaded
@@ -173,7 +172,6 @@ struct LeafItem
 	glm::vec3 min, max, center;
 	PrimType type;
 	int index;
-	
 };
 
 struct Material
@@ -188,7 +186,7 @@ struct Material
 struct GaussianSplat
 {
 	glm::vec3 center;
-	glm::mat3x3 rotation;
+	glm::quat rotation;
 	glm::vec3 invScale2;
 	float alpha;
 	unsigned int materialIndex;

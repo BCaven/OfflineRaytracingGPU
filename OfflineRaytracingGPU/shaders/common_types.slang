@@ -98,10 +98,11 @@ public struct Triangle
     uint materialIndex;
 };
 
+// TODO: clean up this
 public struct GaussianSplat // packing shenanigans available here. Probably more important to hit fewer of these
 {
     float3 center;
-    float3x3 rotation; // TODO: could totally be quaternion instead
+    float4 rotation; // TODO: could totally be quaternion instead
     float3 invScale2;
     float alpha;
     uint materialIndex;
