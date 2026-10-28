@@ -1994,6 +1994,140 @@ int VK_Wrap::buildChildBVH(std::vector<LeafItem>& leaves)
 	return buildSAH(leaves, 0, leaves.size(), childMin, childMax);
 }
 
+PackedRef VK_Wrap::buildLBVH(std::vector<LeafItem>& leaves)
+{
+	std::cout << "building lbvh\n";
+	const int n = (int)leaves.size();
+	if (n == 0)
+	{
+		return (int)bvhNodes.size() - 1; // preserved from the old behavior
+	}
+
+	const int base = (int)bvhNodes.size();
+
+	// ---- Stage 1 (K1/K2): Morton keys over *center* bounds ----
+	glm::vec3 cMin(FLT_MAX), cMax(-FLT_MAX);
+	for (const auto& l : leaves)
+	{
+		cMin = make_aabb_min(l.center, cMin);
+		cMax = make_aabb_max(l.center, cMax);
+	}
+	glm::vec3 invExtent = 1.f / make_aabb_max(cMax - cMin, glm::vec3(1e-8f));
+
+	struct KeyIdx { uint64_t key; int idx; };
+	std::vector<KeyIdx> order(n);
+	for (int i = 0; i < n; ++i)
+		order[i] = { compute_morton_code(leaves[i].center, cMin, invExtent), i };
+
+	// Keys are computed once, and the idx tie-break makes the order deterministic.
+	std::sort(order.begin(), order.end(), [](const KeyIdx& a, const KeyIdx& b)
+		{ return a.key != b.key ? a.key < b.key : a.idx < b.idx; });
+
+	// ---- Stage 2 (K3/K4): gather into sorted order ----
+	std::vector<LeafItem> sorted(n);
+	std::vector<uint64_t> keys(n);
+	for (int i = 0; i < n; ++i)
+	{
+		sorted[i] = leaves[order[i].idx];
+		keys[i] = order[i].key;
+	}
+
+	// Single primitive: root node with an EMPTY right child, as before.
+	if (n == 1)
+	{
+		bvhChild left{ sorted[0].min, sorted[0].max, sorted[0].type, sorted[0].index };
+		bvhChild right{ glm::vec3(FLT_MAX), glm::vec3(-FLT_MAX), PrimType::EMPTY, -1 };
+		bvhNodes.push_back(bvhNode{ .mortonCode = 0, .left = left, .right = right });
+		return base;
+	}
+
+	// ---- Stage 3 (K5): Karras hierarchy emission, n-1 independent "threads" ----
+	auto delta = [&](int i, int j) -> int
+		{
+			if (j < 0 || j >= n) return -1;
+			if (keys[i] == keys[j])
+				return 64 + std::countl_zero((uint32_t)(i ^ j)); // tie-break on index
+			return std::countl_zero(keys[i] ^ keys[j]);
+		};
+
+	auto leafChild = [&](int k)
+		{
+			const LeafItem& l = sorted[k];
+			return bvhChild{ l.min, l.max, l.type, l.index };
+		};
+	auto nodeChild = [&](int k)
+		{
+			// bounds are filled in by the fit stage
+			return bvhChild{ glm::vec3(FLT_MAX), glm::vec3(-FLT_MAX), PrimType::BVH_NODE, base + k };
+		};
+
+	bvhNodes.resize(base + n - 1);
+	std::vector<int>     leafParent(n, -1);
+	std::vector<int>     nodeParent(n - 1, -1);
+	std::vector<uint8_t> nodeSide(n - 1, 0); // 0 = left child of parent, 1 = right
+
+	for (int i = 0; i < n - 1; ++i)
+	{
+		int d = (delta(i, i + 1) - delta(i, i - 1)) >= 0 ? 1 : -1;
+		int dMin = delta(i, i - d);
+
+		int lmax = 2;
+		while (delta(i, i + lmax * d) > dMin) lmax *= 2;
+
+		int l = 0;
+		for (int t = lmax / 2; t >= 1; t /= 2)
+			if (delta(i, i + (l + t) * d) > dMin) l += t;
+		int j = i + l * d;
+
+		int dNode = delta(i, j);
+		int s = 0, t = l;
+		do
+		{
+			t = (t + 1) >> 1;
+			if (delta(i, i + (s + t) * d) > dNode) s += t;
+		} while (t > 1);
+
+		int gamma = i + s * d + std::min(d, 0);
+		int lo = std::min(i, j), hi = std::max(i, j);
+
+		bvhNode& nd = bvhNodes[base + i];
+		nd.mortonCode = 0;
+
+		if (lo == gamma) { nd.left = leafChild(gamma);  leafParent[gamma] = i; }
+		else { nd.left = nodeChild(gamma); nodeParent[gamma] = i; nodeSide[gamma] = 0; }
+
+		if (hi == gamma + 1) { nd.right = leafChild(gamma + 1); leafParent[gamma + 1] = i; }
+		else { nd.right = nodeChild(gamma + 1); nodeParent[gamma + 1] = i; nodeSide[gamma + 1] = 1; }
+	}
+
+	// ---- Stage 4 (K6): bottom-up bounds fit, one "thread" per leaf ----
+	// First arrival at a node stops. The second arrival has both children ready.
+	std::vector<uint8_t> arrivals(n - 1, 0);
+	for (int leaf = 0; leaf < n; ++leaf)
+	{
+		int p = leafParent[leaf];
+		while (p != -1)
+		{
+			if (arrivals[p]++ == 0) break;
+
+			const bvhNode& nd = bvhNodes[base + p];
+			glm::vec3 mn = make_aabb_min(nd.left.min, nd.right.min);
+			glm::vec3 mx = make_aabb_max(nd.left.max, nd.right.max);
+
+			int pp = nodeParent[p];
+			if (pp == -1) break; // root; its bounds are the union of its two child entries
+
+			bvhChild& slot = nodeSide[p] ? bvhNodes[base + pp].right : bvhNodes[base + pp].left;
+			slot.min = mn;
+			slot.max = mx;
+			p = pp;
+		}
+	}
+
+	return packChild(BVH_NODE, base); // Karras root is always internal node 0
+}
+
+
 /*
 Each node needs:
 child to pursue
@@ -2177,7 +2311,7 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 {
 	std::cout << "Loading collection\n";
-	bool useKdop = (references.size() > 8) && !bThreaded;
+	bool useKdop = false; //(references.size() > 8) && !bThreaded;
 	std::vector<LeafItem> leavesAABB;
 	std::vector<KDopLeaf> leavesKdop;
 
@@ -2374,7 +2508,8 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 	}
 	else
 	{
-		index = buildChildBVH(leavesAABB);
+		std::cout << "building bvh\n";
+		index = unpackIndex(buildLBVH(leavesAABB));
 		t = BVH_NODE;
 	}
 
@@ -2413,6 +2548,7 @@ PackedRef VK_Wrap::loadTransform(glm::vec3 translation, glm::vec3 rotation, glm:
 
 PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 {
+	std::cout << "Loading: " << filepath << "\n";
 	// load mesh and build its BLAS bvh
 	// the only way for this to be in the scene is to make it the child of a transform node
 	// Mesh data
@@ -2436,10 +2572,10 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 		throw std::runtime_error("When loading " + filepath + " number of vertices was not a multiple of 3!");
 	}
 
-	std::cout << "Loading " << filepath << " with " << (int)vertices.size() / 3 << " triangles\n";
+	std::cout << "Loaded " << filepath << " with " << (int)vertices.size() / 3 << " triangles\n";
 	std::vector<KDopLeaf> leavesKdop;
 	std::vector<LeafItem> leavesAABB;
-	bool useKdop = false; //(vertices.size() > (3 * 16));
+	bool useKdop = false; (vertices.size() > (3 * 16));
 	for (size_t i = 0; i < vertices.size(); i += 3)
 	{
 		glm::vec3 v0 = vertices[i].pos;
@@ -2511,7 +2647,7 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	{
 		std::cout << "Loading aabb\n";
 
-		index = buildChildBVH(leavesAABB);
+		index = unpackIndex(buildLBVH(leavesAABB));
 		t = BVH_NODE;
 	}
 
@@ -2783,19 +2919,45 @@ PackedRef VK_Wrap::loadSplatAABB(std::string filepath)
 
 PackedRef VK_Wrap::loadSplat(std::string filepath)
 {
-	if (bThreaded)
-	{
-		std::cout << "using the binary AABB loader instead\n";
-		return loadSplatAABB(filepath);
-	}
 	auto leaves = loadSplat_helper(filepath);
-
-	std::cout << "building tree\n";
-	K14Dop outDop;
-	int binaryKdop = build14DOP_parallel(leaves, 0, leaves.size(), outDop);
-
-	std::cout << "flattening tree\n";
-	return packChild(KDOP_NODE, flattenKDop(binaryKdop));
+	bool useKDop = false;
+	PackedRef root = packChild(EMPTY, 0);
+	if (useKDop)
+	{
+		std::cout << "building tree\n";
+		K14Dop outDop;
+		int binaryKdop = build14DOP_parallel(leaves, 0, leaves.size(), outDop);
+		
+		bool useBinary = true;
+		if (useBinary)
+		{
+			root = packChild(KDOP_NODE_BINARY, binaryKdop);
+		}
+		else
+		{
+			std::cout << "flattening tree\n";
+			root = packChild(KDOP_NODE, flattenKDop(binaryKdop));
+		}
+	}
+	else
+	{
+		std::cout << "converting k-DOP to AABB\n";
+		std::vector<LeafItem> aabbLeaves;
+		for (const auto& l : leaves)
+		{
+			aabbLeaves.push_back(
+				LeafItem{
+					.min = glm::vec3(l.kDop.min[0], l.kDop.min[1], l.kDop.min[2]),
+					.max = glm::vec3(l.kDop.max[0], l.kDop.max[1], l.kDop.max[2]),
+					.center = l.center,
+					.type = l.type,
+					.index = l.index
+				}
+			);
+		}
+		root = buildLBVH(aabbLeaves);
+	}
+	return root;
 }
 PackedRef VK_Wrap::loadSplatBinary(std::string filepath)
 {
@@ -2805,7 +2967,6 @@ PackedRef VK_Wrap::loadSplatBinary(std::string filepath)
 	K14Dop outDop;
 	int binaryKdop = build14DOP_parallel(leaves, 0, leaves.size(), outDop);
 
-	std::cout << "flattening tree\n";
 	return packChild(KDOP_NODE_BINARY, binaryKdop);
 }
 

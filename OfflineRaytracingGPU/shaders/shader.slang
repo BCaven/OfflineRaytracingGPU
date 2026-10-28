@@ -102,7 +102,18 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
         uint2 rayIndex = (uint2)screenCoords;
 
         float3 direction = normalize(mul(shaderData.camera.rotationMatrix, float3(uv, focus_distance)));
-        ray = makeRay(rayIndex, origin, direction);
+
+        // stratified wavelengths
+        // min: 380
+        // max: 730
+        const int NUM_STRATA = 5;
+        const float MAX_WAVELENGH = 730.f;
+        const float MIN_WAVELENGH = 380.f;
+        const float WAVELENGTH_RANGE = MAX_WAVELENGH - MIN_WAVELENGH;
+        float strataStart = ( shaderData.frameCount % NUM_STRATA ) / (float) NUM_STRATA;
+        float strataEnd = (1.f + ( shaderData.frameCount % NUM_STRATA )) / (float) NUM_STRATA;
+
+        ray = makeRay(rayIndex, origin, direction, MIN_WAVELENGH + (strataStart * WAVELENGTH_RANGE), MIN_WAVELENGH + (strataEnd * WAVELENGTH_RANGE));
         validRay = true;
     }
     else

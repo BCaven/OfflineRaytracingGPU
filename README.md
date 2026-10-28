@@ -1,7 +1,7 @@
 # Offline GPU Path Tracer
 
 Interactive progressive spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
-![5.9m splats](ProjectAssets/SplatInterior.png)
+![5.9m splats](ProjectAssets/threaded_large_splat.png)
 
 # Controls and terminology
 
@@ -18,7 +18,6 @@ Arrow keys `right` and `left` move through time. \
 - Sphere primitives
 - Triangle primitives + OBJ loader
 - BSDF material support for ior and metallic
-- CPU BVH construction and GPU traversal
 - Mesh lights
 - Gaussian Splat primitives + PLY loader
 - Progressive path tracing with temporal accumulation and interactive camera
@@ -30,6 +29,10 @@ Arrow keys `right` and `left` move through time. \
 - Spectral sampling
 - Compute shader pipeline
 - Animations with variable time step
+- Threaded BVH traversal algorithm
+- 8-wide BVH traversal algorithm
+- CPU LBVH construction
+- stratified wavelengths
 
 # Implementation details
 
@@ -42,10 +45,11 @@ All tests done on a RTX 4090 at 1280x720.
 
 | model         | threaded aabb | threaded kdop | wide kdop stack |
 | ------------- | ------------- | ------------- |---------------- |
-| Beholder 3m   | 2.21ms        |               | times out       |
-| Beholder 1.7m | 1.19ms        |               | 23.67ms         |
+| Beholder 3m   | 2.21ms        | 3.52ms        | times out       |
+| Beholder 1.7m | 1.19ms        | 2.04ms        | 23.67ms         |
 
-These results are for a single bounce, which is all that is computed per frame.
+These results are for a single frame, which computes a single bounce for one ray per pixel. \
+The test model is also not a "optimal" scene for k-DOP since all primitives are uniformly sized and fit AABBs well.
 
 ## Transforms
 
@@ -57,7 +61,8 @@ Since transforms point to an arbitrary child, it allows for construction of nest
 The following will use these definitions: \
 Primitive: a single triangle, sphere, gaussian splat, etc. \
 Instance: a collection of primitives contained in a BLAS. \
-Collection: group of instances in an acceleration structure. \
+Collection: group of instances in an acceleration structure. 
+
 Note: collections can contain other collections. This node structure means the following tree is possible:
 
 ```
@@ -115,6 +120,13 @@ The number of rays accumulated per image is controlled by `wrapper.numFramesPerF
 
 The scene is rebuilt between each subsequent time step in the animation.
 
+# Stratified wavelengths
+
+To reduce the number of frames needed to converge on a correct image, the wavelengths are stratified. \
+The default number of bins is 5.
+
+Here is an example video:
+![progressive stratified render](ProjectAssets/progressive_stratified_render.mp4)
 
 # Building and contributing
 

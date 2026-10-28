@@ -418,6 +418,7 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 
 PackedRef prism_demo(VK_Wrap& wrapper)
 {
+	wrapper.bThreaded = true;
 	std::string prefix = "renderedFrames/prism_4_";
 	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
 
@@ -714,22 +715,21 @@ PackedRef threaded(VK_Wrap& wrapper)
 	glm::vec4 green = glm::vec4(0, 1, 0, 1);
 	glm::vec4 white = glm::vec4(1);
 
-	glm::vec4 light_white = glm::vec4(10);
+	glm::vec4 light_white = glm::vec4(100);
 	glm::vec4 light_purple = glm::vec4(128, 0, 255, 255) / 255.f;
-	glm::vec4 sky = 5.f * (glm::vec4(4, 4, 4, 255) / 255.f);
+	glm::vec4 sky = (glm::vec4(40, 40, 40, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
 			Material{ pastel_orange, 1 },					// 0
 			Material{ pastel_green, -1.5, 50 },				// 1
 			Material{ pastel_blue, 0.5 },					// 2
-			Material{ pastel_purple, 0 },	// 3
+			Material{ pastel_grey, -1.7, 30 },				// 6
+			Material{ pastel_purple, 0, 0, light_purple },	// 3
 			Material{ pastel_purple, 0 },			// 4
 			Material{ white, 0 },			// 5
-			Material{ pastel_grey, -1.7, 30 },				// 6
-			Material{ red, 0 },								// 7
+			Material{ red, -1.2, 80 },								// 7
 			Material{ green, 0 },							// 8
 			Material{ white, 0, 0, light_white },			// 9
-			Material{ white, 0 },							// 10
 			Material{										// 11
 				.color = white,
 				.metallicOrIor = -1.9,
@@ -810,14 +810,33 @@ PackedRef threaded(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	auto aabbSplat = wrapper.loadSplatAABB("assets/tomatoes_10x_180.ply");
-	//auto aabbSplat = wrapper.loadSplatAABB("assets/readingroom_1x_180.ply");
+	//auto aabbSplat = wrapper.loadSplatAABB("assets/tomatoes_10x_180.ply");
+	//auto aabbSplat = wrapper.loadSplat("assets/readingroom_1x_180.ply");
+	//auto sceneCollection = wrapper.loadSplatCollection("assets/readingroom_1x_180.ply");
 	//auto binarySplat = wrapper.loadSplatBinary("assets/tomatoes_10x_180.ply");
 	//auto normalSplat = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
-	//auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
+	auto beholder = wrapper.loadObj("assets/beholder.obj", 0);
 	//auto suzanne = wrapper.loadObj("assets/suzanne.obj", 0);
+	float radius = 3;
+	float rot = wrapper.time;
+	unsigned int matIndex = 0;
+	glm::vec3 offset(1, 0, 1);
+	for (float r = 0 + rot; r < (PI * 2) + rot; r += PI / 8)
+	{
+		matIndex++;
+		matIndex = matIndex % 11;
+		wrapper.spheres.push_back(
+			Sphere{ offset + glm::vec3((std::sin(r) * radius), 0, (std::cos(r) * radius)), 0.25, matIndex }
+		);
+	}
 
-	return aabbSplat; //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
+	for (int i = 0; i < wrapper.spheres.size(); i++)
+	{
+		PackedRef p = packChild(PrimType::SPHERE, i);
+		//sceneCollection.push_back(p);
+	}
+
+	return beholder; //wrapper.loadCollection(sceneCollection); //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)
@@ -888,7 +907,7 @@ int main(int argc, char* argv[])
 	wrapper.savePath = "renderedFrames/default.exr";
 
 	wrapper.numFramesPerFile = 200;
-	wrapper.numImagesPerSequence = 20;
+	wrapper.numImagesPerSequence = 1;
 	float end_time = 29;
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;

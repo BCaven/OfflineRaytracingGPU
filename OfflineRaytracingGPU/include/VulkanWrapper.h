@@ -339,6 +339,9 @@ public:
 
 	int buildChildBVH(std::vector<LeafItem>& leaves);
 
+	PackedRef buildLBVH(std::vector<LeafItem>& leaves);
+
+
 	int registerMatrix(glm::mat4 mat);
 
 	int makeHitTransform(

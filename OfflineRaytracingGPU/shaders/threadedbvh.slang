@@ -73,25 +73,20 @@ bool isThreaded(PrimType t)
     return t == PrimType::THREADED_NODE || t == PrimType::THREADED_KDOP;
 }
 
-Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType rootType)
+Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType rootType, Intersection startClosest, float scaleT, float3x3 sceneTransform)
 {
-    Intersection closest = no_intersection();
-    closest.t = FLT_MAX;
+    Intersection closest = startClosest;
 
     uint index = rootIndex;
     PrimType nodeType = rootType;
 
     Ray currentRay = startRay;
-    float4x4 currentTransform = identity4x4();
-    float4x4 accumulatedTransform = identity4x4();
-    float scaleT = 1;
     while (index < INDEX_MAX)
     {
         if (!isThreaded(nodeType))
         {
             // somehow we pursued a non-threaded node
-            float3x3 normalMat = transpose((float3x3)accumulatedTransform);
-            bool primHit = ProcessPrimitive(nodeType, index, currentRay, closest, normalMat, scaleT);
+            bool primHit = ProcessPrimitive(nodeType, index, currentRay, closest, sceneTransform, scaleT);
             return closest;
         }
         else if (nodeType == PrimType::THREADED_KDOP)
@@ -123,7 +118,7 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
                 else
                 {
                     Ray r = currentRay; float s = scaleT;
-                    ProcessPrimitive(childType, childIdx, r, closest, identity3x3(), s);
+                    ProcessPrimitive(childType, childIdx, r, closest, sceneTransform, s);
 
                     // get sibling too
                     uint sibIdx = unpackIndex(current.packedSibling);
@@ -138,7 +133,7 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
                     {
                         // second child is also a primitive: process it, then fall through to miss
                         Ray r = currentRay; float s = scaleT;
-                        ProcessPrimitive(sibType, sibIdx, r, closest, identity3x3(), s);
+                        ProcessPrimitive(sibType, sibIdx, r, closest, sceneTransform, s);
                     }
                 }
             }
@@ -147,7 +142,6 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
         }
         else
         {
-
             // process index collision
             // if it hit and is closest, process the child
             // if it missed, make the index the skip index
@@ -171,7 +165,7 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
                 else
                 {
                     Ray r = currentRay; float s = scaleT;
-                    ProcessPrimitive(childType, childIdx, r, closest, identity3x3(), s);
+                    ProcessPrimitive(childType, childIdx, r, closest, sceneTransform, s);
 
                     // get sibling too
                     uint sibIdx = unpackIndex(current.packedSibling);
@@ -186,7 +180,7 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
                     {
                         // second child is also a primitive: process it, then fall through to miss
                         Ray r = currentRay; float s = scaleT;
-                        ProcessPrimitive(sibType, sibIdx, r, closest, identity3x3(), s);
+                        ProcessPrimitive(sibType, sibIdx, r, closest, sceneTransform, s);
                     }
                 }
             }
