@@ -71,20 +71,16 @@ on the last bounce: frag shader output is written to history frame
 every other bounce: frag shader output displayed as normal
 */
 
-#define GROUP_SIZE 64
-#define STACK_DEPTH 32
-
-groupshared TraversalNode gStack[GROUP_SIZE * STACK_DEPTH];
 
 [shader("compute")]
-[numthreads(64,1,1)] // TODO: adjust this to match max queue size
-void computeMain(uint3 threadId : SV_DispatchThreadID)
+[numthreads(GROUP_SIZE, 1, 1)] // TODO: adjust this to match max queue size
+void computeMain(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
 {
 
     uint index = threadId.x;
     uint wrappedIndex = index % (shaderData.windowMax.x * shaderData.windowMax.y);
     float2 screenCoords = float2(wrappedIndex % shaderData.windowMax.x, (wrappedIndex - (wrappedIndex % shaderData.windowMax.x)) / shaderData.windowMax.x);
-    init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10.f) + shaderData.bounceCount + index);
+    init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount + index);
 
     uint numStartRays = shaderData.windowMax.x * shaderData.windowMax.y;
     Ray ray;
@@ -132,7 +128,7 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
     bool firstBounce = (shaderData.bounceCount == 0) && (shaderData.frameCount == 0);
     if (validRay)
     {
-        float4 retColor = ray_spectral(ray, shaderData.sceneRoot, shaderData.camDir, firstBounce, shaderData.backgroundColor, shaderData.bounceCount); 
+        float4 retColor = ray_spectral(gi, ray, shaderData.sceneRoot, shaderData.camDir, firstBounce, shaderData.backgroundColor, shaderData.bounceCount); 
         // TODO: need to add retColor in accordance with ray's pdf
         // for now, lets just pretend like there is only one ray per pixel, so simply overwriting whatever is there is fine
         currentFrameRGB[ray.index] = retColor;

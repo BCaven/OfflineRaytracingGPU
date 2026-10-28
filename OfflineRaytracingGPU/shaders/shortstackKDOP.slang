@@ -86,7 +86,7 @@ bool popTraversal(
     while (stackPtr > 0)
     {
         // clear the node that is getting overwritten (I think?)
-        releaseTransformEntry(transformStack, transformStackPtr, transformStackIndex);
+        //releaseTransformEntry(transformStack, transformStackPtr, transformStackIndex);
         ShortStackNode top = stack[--stackPtr];
         uint parentLevel = top.parentLevel;
         uint parentSlot = top.parentSlot;

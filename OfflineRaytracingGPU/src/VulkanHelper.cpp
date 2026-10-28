@@ -418,7 +418,7 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
 
 PackedRef prism_demo(VK_Wrap& wrapper)
 {
-	wrapper.bThreaded = true;
+	wrapper.bThreaded = false;
 	std::string prefix = "renderedFrames/prism_4_";
 	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
 
@@ -698,7 +698,7 @@ PackedRef fractal(VK_Wrap& wrapper)
 
 PackedRef threaded(VK_Wrap& wrapper)
 {
-	wrapper.bThreaded = true;
+	wrapper.bThreaded = false;
 	std::string prefix = "renderedFrames/threaded_";
 	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
 
@@ -815,7 +815,7 @@ PackedRef threaded(VK_Wrap& wrapper)
 	//auto sceneCollection = wrapper.loadSplatCollection("assets/readingroom_1x_180.ply");
 	//auto binarySplat = wrapper.loadSplatBinary("assets/tomatoes_10x_180.ply");
 	//auto normalSplat = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
-	auto beholder = wrapper.loadObj("assets/beholder.obj", 0);
+	auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
 	//auto suzanne = wrapper.loadObj("assets/suzanne.obj", 0);
 	float radius = 3;
 	float rot = wrapper.time;
@@ -836,7 +836,7 @@ PackedRef threaded(VK_Wrap& wrapper)
 		//sceneCollection.push_back(p);
 	}
 
-	return beholder; //wrapper.loadCollection(sceneCollection); //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
+	return beholder; // wrapper.loadCollection(sceneCollection); //wrapper.loadCollection({ cornellBox, sphereCollection , prismCollection, halfSuzanneIndex/*splatCollection, suzanneCollection*/ });
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)

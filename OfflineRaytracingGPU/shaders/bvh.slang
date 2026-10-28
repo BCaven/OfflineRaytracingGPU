@@ -3,32 +3,7 @@ implementing scene;
 __include bvh_header;
 
 
-void push_stack(inout TraversalNode stack[STACK_SIZE],
-                inout uint stackPtr,
-                TraversalNode item)
-{
-    if (stackPtr < STACK_SIZE)
-    {
-        stack[stackPtr++] = item;
-    }
-}
 
-void push_transform_stack(inout TransformStackNode stack[TRANSFORM_STACK_SIZE], inout uint transformStackPtr, TransformStackNode item)
-{
-    if (transformStackPtr < TRANSFORM_STACK_SIZE)
-    {
-        stack[transformStackPtr++] = item;
-    }
-}
-
-void releaseTransformEntry(inout TransformStackNode transformStack[TRANSFORM_STACK_SIZE], inout uint transformStackPtr, uint idx)
-{
-    transformStack[idx].nodesUsingThis--;
-    while (transformStackPtr > 0 && transformStack[transformStackPtr - 1].nodesUsingThis == 0)
-    {
-        transformStackPtr--;
-    }
-}
 
 bool transformRay(TraversalNode node, TransformStackNode transformNode, uint transformIdx, Transform t, out TraversalNode result, out TransformStackNode resultTransformStack)
 {
@@ -60,10 +35,8 @@ bool transformRay(TraversalNode node, TransformStackNode transformNode, uint tra
 }
 
 void processChild(
-    inout TraversalNode stack[STACK_SIZE], 
-    inout uint stackPtr,
-    inout TransformStackNode transformStack[TRANSFORM_STACK_SIZE],
-    inout uint transformStackPtr,
+    inout TraversalStack stack,
+    inout TransformStack transformStack,
     TraversalNode node, 
     inout Intersection closest, 
     uint childIndex,
@@ -78,14 +51,14 @@ void processChild(
         childNode.packedIndexType = packChild(childType, childIndex);
         childNode.tEntry = childT;
         childNode.transformStackIndex = node.transformStackIndex;
-        transformStack[node.transformStackIndex].nodesUsingThis += 1;
+        transformStack.increaseNodesUsing(node.transformStackIndex, 1);
 
-        push_stack(stack, stackPtr, childNode);
+        stack.push(childNode);
     }
     else if (childType == PrimType::TRANSFORM)
     {
         Transform t = transforms[childIndex];
-        TransformStackNode transformStackNode = transformStack[node.transformStackIndex];
+        TransformStackNode transformStackNode = transformStack.get(node.transformStackIndex);
         TraversalNode resolved;
         TransformStackNode resolvedStackNode;
         node.tEntry = childT;
@@ -93,18 +66,18 @@ void processChild(
         if (transformRay(node, transformStackNode, childIndex, t, resolved, resolvedStackNode))
         {
             resolvedStackNode.nodesUsingThis = 1;
-            uint newTransformIndex = transformStackPtr;
+            uint newTransformIndex = transformStack.pt;
             resolved.transformStackIndex = newTransformIndex;
 
-            push_stack(stack, stackPtr, resolved);
-            push_transform_stack(transformStack, transformStackPtr, resolvedStackNode);
+            stack.push(resolved);
+            transformStack.push(resolvedStackNode);
             
         }        
     }
     else
     {
         Ray intersectionRay;
-        TransformStackNode currentTransform = transformStack[node.transformStackIndex];
+        TransformStackNode currentTransform = transformStack.get(node.transformStackIndex);
         intersectionRay.direction = currentTransform.rayDirection;
         intersectionRay.origin = currentTransform.rayOrigin;
 
@@ -120,7 +93,7 @@ void processChild(
     }
 }
 
-Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType rootType)
+Intersection intersect_scene_wide_dfs(uint gi, Ray startRay, uint rootIndex, PrimType rootType)
 {
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
@@ -131,36 +104,35 @@ Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType roo
     identityTransform.rayOrigin = startRay.origin;
     identityTransform.transformDepth = 0;
     identityTransform.nodesUsingThis = 1;
-    TransformStackNode transformStack[TRANSFORM_STACK_SIZE];
-    int transformStackPtr = 0;
-    transformStack[transformStackPtr++] = identityTransform;
+    TransformStack transformStack = { gi, 0 };
+    transformStack.push(identityTransform);
 
     TraversalNode root;
     root.packedIndexType = packChild(rootType, rootIndex);
     root.tEntry = 0;
     root.transformStackIndex = 0;
-    TraversalNode stack[STACK_SIZE];
-    int stackPtr = 0;
 
-    stack[stackPtr++] = root;
+    TraversalStack stack = { gi, 0 };
+
+    stack.push(root);
 
     uint traversals = 0;
 
-    while (stackPtr > 0 && traversals < MAX_TRAVERSALS)
+    while (!stack.empty() && traversals < MAX_TRAVERSALS)
     {
-        TraversalNode current = stack[--stackPtr];
+        TraversalNode current = stack.pop();
         // early release if there is already a closer node
         float tEntry = current.tEntry;
         if (tEntry >= closest.t)
         {
-            releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
+            transformStack.releaseTransformEntry(current.transformStackIndex);
             continue;
         }
 
         uint nodeIndex = unpackIndex(current.packedIndexType);
         PrimType currentType = unpackType(current.packedIndexType);
 
-        TransformStackNode transformNode = transformStack[current.transformStackIndex];
+        TransformStackNode transformNode = transformStack.get(current.transformStackIndex);
 
         Ray intersectionRay;
         intersectionRay.direction = transformNode.rayDirection;
@@ -174,7 +146,7 @@ Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType roo
 
             if (validMask == 0u)
             {
-                releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
+                transformStack.releaseTransformEntry(current.transformStackIndex);
                 continue;
             }
 
@@ -189,9 +161,7 @@ Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType roo
 
                 processChild(
                     stack, 
-                    stackPtr, 
                     transformStack, 
-                    transformStackPtr, 
                     current, 
                     closest, 
                     index, 
@@ -226,31 +196,31 @@ Intersection intersect_scene_wide_dfs(Ray startRay, uint rootIndex, PrimType roo
                 // push far child first
                 if (rightT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, rightIndex, rightType, rightT);
+                    processChild(stack, transformStack, current, closest, rightIndex, rightType, rightT);
                 }
                 if (leftT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, leftIndex, leftType, leftT);
+                    processChild(stack, transformStack, current, closest, leftIndex, leftType, leftT);
                 }
             }
             else
             {
                 if (leftT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, leftIndex, leftType, leftT);
+                    processChild(stack, transformStack, current, closest, leftIndex, leftType, leftT);
                 }
                 if (rightT < closest.t)
                 {
-                    processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, rightIndex, rightType, rightT);
+                    processChild(stack, transformStack, current, closest, rightIndex, rightType, rightT);
                 }
             }
         }
         else
         {
             // primitive or a transform -> transform chain
-            processChild(stack, stackPtr, transformStack, transformStackPtr, current, closest, nodeIndex, currentType, current.tEntry);
+            processChild(stack, transformStack, current, closest, nodeIndex, currentType, current.tEntry);
         }
-        releaseTransformEntry(transformStack, transformStackPtr, current.transformStackIndex);
+        transformStack.releaseTransformEntry(current.transformStackIndex);
     }
 
     return closest;

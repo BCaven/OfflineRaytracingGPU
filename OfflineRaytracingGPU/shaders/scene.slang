@@ -11,7 +11,7 @@ __include common_types;
 
 __include primitives;
 
-__include shortstackKDOP;
+//__include shortstackKDOP;
 
 __include threadedbvh;
 
@@ -48,7 +48,7 @@ float3 spectral_sample_to_RGB(float value, float lambda, float lambda_pdf)
     return (value / lambda_pdf) * xyz_response / CIE_Y_INTEGRAL;
 }
 
-public float4 ray_spectral(Ray ray, uint sceneRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor, int frameIndex)
+public float4 ray_spectral(uint gi, Ray ray, uint sceneRoot, float3 camDir, bool firstBounceDebug, float4 backgroundColor, int frameIndex)
 {
     uint rootIndex = unpackIndex(sceneRoot);
     PrimType rootType = unpackType(sceneRoot);
@@ -62,7 +62,7 @@ public float4 ray_spectral(Ray ray, uint sceneRoot, float3 camDir, bool firstBou
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
 
-    Intersection intersection = intersect_scene_threaded(ray, rootIndex, rootType, closest, 1.f, identity3x3()); //intersect_scene_wide_dfs(ray, rootIndex, rootType); //
+    Intersection intersection = intersect_scene_wide_dfs(gi, ray, rootIndex, rootType); // intersect_scene_threaded(ray, rootIndex, rootType, closest, 1.f, identity3x3()); //
     if (!valid_intersection(intersection))
     {
         float skySpectral = rgb_to_spectral(sky_color(ray, backgroundColor), ray.wavelength);

@@ -44,9 +44,9 @@ Early experiments with threaded bvh traversal yielded the following active frame
 All tests done on a RTX 4090 at 1280x720.
 
 | model         | threaded aabb | threaded kdop | wide kdop stack |
-| ------------- | ------------- | ------------- |---------------- |
-| Beholder 3m   | 2.21ms        | 3.52ms        | times out       |
-| Beholder 1.7m | 1.19ms        | 2.04ms        | 23.67ms         |
+| ------------- | ------------- | ------------- | --------------- |
+| Beholder 3m   | 2.21ms        | 3.52ms        | 12.18ms         |
+| Beholder 1.7m | 1.19ms        | 2.04ms        | 4.99ms          |
 
 These results are for a single frame, which computes a single bounce for one ray per pixel. \
 The test model is also not a "optimal" scene for k-DOP since all primitives are uniformly sized and fit AABBs well.

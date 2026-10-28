@@ -2311,7 +2311,7 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 {
 	std::cout << "Loading collection\n";
-	bool useKdop = false; //(references.size() > 8) && !bThreaded;
+	bool useKdop = false; // (references.size() > 8);
 	std::vector<LeafItem> leavesAABB;
 	std::vector<KDopLeaf> leavesKdop;
 
@@ -2508,9 +2508,57 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 	}
 	else
 	{
-		std::cout << "building bvh\n";
-		index = unpackIndex(buildLBVH(leavesAABB));
-		t = BVH_NODE;
+		std::cout << "Loading aabb\n";
+		int firstIndex = bvhNodes.size();
+		auto binaryAABB = buildLBVH(leavesAABB);
+		int lastIndex = bvhNodes.size();
+		int kdopRoot = kdopNodes.size();
+		std::cout << "Converting to kdop\n";
+		std::cout << "num bvhNodes: " << lastIndex - firstIndex << "\n";
+		std::cout << "first index: " << firstIndex << "\n" << "last index: " << lastIndex << "\n";
+		std::cout << "Starting number of kdop nodes: " << kdopNodes.size() << "\n";
+
+		for (int i = firstIndex; i < lastIndex; i++)
+		{
+			const auto& aabbNode = bvhNodes[i];
+			K14Dop l;
+			K14Dop r;
+
+			for (int j = 0; j < 3; j++)
+			{
+				l.max[j] = aabbNode.left.max[j];
+				l.min[j] = aabbNode.left.min[j];
+				r.max[j] = aabbNode.right.max[j];
+				r.min[j] = aabbNode.right.min[j];
+			}
+
+			PrimType tl = KDOP_NODE_BINARY;
+			PrimType tr = KDOP_NODE_BINARY;
+
+			if (aabbNode.left.type != BVH_NODE)
+			{
+				tl = aabbNode.left.type;
+			}
+			if (aabbNode.right.type != BVH_NODE)
+			{
+				tr = aabbNode.right.type;
+			}
+
+			kdopNodes.push_back(KDopNode{
+				.packedIndexType_left = packChild(tl, aabbNode.left.index),
+				.packedIndexType_right = packChild(tr, aabbNode.right.index),
+				.kDop_left = l,
+				.kDop_right = r
+				});
+		}
+		std::cout << "new number of kdop nodes: " << kdopNodes.size() << "\n";
+
+		std::cout << "Flattening kdop\n";
+
+		index = flattenKDop(kdopRoot);
+
+		//index = ;
+		t = KDOP_NODE;
 	}
 
 	return packChild(t, index);
@@ -2575,7 +2623,7 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	std::cout << "Loaded " << filepath << " with " << (int)vertices.size() / 3 << " triangles\n";
 	std::vector<KDopLeaf> leavesKdop;
 	std::vector<LeafItem> leavesAABB;
-	bool useKdop = false; (vertices.size() > (3 * 16));
+	bool useKdop = false; //(vertices.size() > (3 * 16));
 	for (size_t i = 0; i < vertices.size(); i += 3)
 	{
 		glm::vec3 v0 = vertices[i].pos;
@@ -2628,8 +2676,10 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 		int start = kdopNodes.size();
 		K14Dop outDop;
 		int binaryKdop = build14DOP(leavesKdop, 0, leavesKdop.size(), outDop);
+
 		if (bThreaded)
 		{
+			
 			std::cout << "using binary kdop\n";
 			std::cout << "Wrote: " << kdopNodes.size() - start << " kdop nodes\n";
 			index = binaryKdop;
@@ -2637,7 +2687,8 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 		}
 		else
 		{
-			std::cout << "using wide kdop\n";
+			std::cout << "using wide kdop (secretly aabb)\n";
+
 
 			index = flattenKDop(binaryKdop);
 			t = KDOP_NODE;
@@ -2646,9 +2697,56 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	else
 	{
 		std::cout << "Loading aabb\n";
+		int firstIndex = bvhNodes.size();
+		auto binaryAABB = buildLBVH(leavesAABB);
+		int lastIndex = bvhNodes.size();
+		int kdopRoot = kdopNodes.size();
+		std::cout << "Converting to kdop\n";
+		std::cout << "num bvhNodes: " << lastIndex - firstIndex << "\n";
+		std::cout << "first index: " << firstIndex << "\n" << "last index: " << lastIndex << "\n";
+		std::cout << "Starting number of kdop nodes: " << kdopNodes.size() << "\n";
 
-		index = unpackIndex(buildLBVH(leavesAABB));
-		t = BVH_NODE;
+		for (int i = firstIndex; i < lastIndex; i++)
+		{
+			const auto& aabbNode = bvhNodes[i];
+			K14Dop l;
+			K14Dop r;
+
+			for (int j = 0; j < 3; j++)
+			{
+				l.max[j] = aabbNode.left.max[j];
+				l.min[j] = aabbNode.left.min[j];
+				r.max[j] = aabbNode.right.max[j];
+				r.min[j] = aabbNode.right.min[j];
+			}
+
+			PrimType tl = KDOP_NODE_BINARY;
+			PrimType tr = KDOP_NODE_BINARY;
+
+			if (aabbNode.left.type != BVH_NODE)
+			{
+				tl = aabbNode.left.type;
+			}
+			if (aabbNode.right.type != BVH_NODE)
+			{
+				tr = aabbNode.right.type;
+			}
+
+			kdopNodes.push_back(KDopNode{
+				.packedIndexType_left = packChild(tl, aabbNode.left.index),
+				.packedIndexType_right = packChild(tr, aabbNode.right.index),
+				.kDop_left = l,
+				.kDop_right = r
+				});
+		}
+		std::cout << "new number of kdop nodes: " << kdopNodes.size() << "\n";
+
+		std::cout << "Flattening kdop\n";
+
+		index = flattenKDop(kdopRoot);
+
+		//index = ;
+		t = KDOP_NODE;
 	}
 
 	return packChild(t, index);
