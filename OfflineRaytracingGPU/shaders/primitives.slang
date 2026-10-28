@@ -47,12 +47,12 @@ float3x3 quatToMat(float4 quatAsFloat4)
     return transpose(Result); // TODO: make the original assignment already be transposed
 }
 
-public Ray makeRay(uint2 rayCoord, float3 origin, float3 direction, float wavelengthMin, float wavelengthMax)
+public Ray makeRay(uint2 rayCoord, float3 origin, float3 direction, float wavelength)
 {
     // ignore counter index since we are ignoring previously written rays
     // TODO: non-uniform samping
 
-    Ray newRay = Ray(origin, direction, 1, 0, wavelengthMin + (rand_float() * (wavelengthMax - wavelengthMin)), rayCoord);
+    Ray newRay = Ray(origin, direction, 1, 0, wavelength, rayCoord);
     return newRay;
 }
 public bool getRay(int rayIndex, int frameIndex, out Ray ray)

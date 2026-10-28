@@ -125,8 +125,11 @@ The scene is rebuilt between each subsequent time step in the animation.
 To reduce the number of frames needed to converge on a correct image, the wavelengths are stratified. \
 The default number of bins is 5.
 
-Here is an example video:
-![progressive stratified render](ProjectAssets/progressive_stratified_render.mp4)
+Here is an example:
+
+![progressive stratified render](ProjectAssets/progressive_stratified_render.gif)
+
+The raw screen recording can be found [here](ProjectAssets/progressive_stratified_render.mp4)
 
 # Building and contributing
 

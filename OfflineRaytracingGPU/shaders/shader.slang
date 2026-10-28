@@ -2,6 +2,7 @@
 
 import scene;
 
+static const int MAX_BOUNCES = 10;
 
 [shader("vertex")]
 VSOutput main(VSInput input, uint instanceIndex : SV_VulkanInstanceID)
@@ -70,6 +71,11 @@ on the last bounce: frag shader output is written to history frame
 every other bounce: frag shader output displayed as normal
 */
 
+#define GROUP_SIZE 64
+#define STACK_DEPTH 32
+
+groupshared TraversalNode gStack[GROUP_SIZE * STACK_DEPTH];
+
 [shader("compute")]
 [numthreads(64,1,1)] // TODO: adjust this to match max queue size
 void computeMain(uint3 threadId : SV_DispatchThreadID)
@@ -78,7 +84,7 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
     uint index = threadId.x;
     uint wrappedIndex = index % (shaderData.windowMax.x * shaderData.windowMax.y);
     float2 screenCoords = float2(wrappedIndex % shaderData.windowMax.x, (wrappedIndex - (wrappedIndex % shaderData.windowMax.x)) / shaderData.windowMax.x);
-    init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount + index);
+    init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10.f) + shaderData.bounceCount + index);
 
     uint numStartRays = shaderData.windowMax.x * shaderData.windowMax.y;
     Ray ray;
@@ -106,14 +112,15 @@ void computeMain(uint3 threadId : SV_DispatchThreadID)
         // stratified wavelengths
         // min: 380
         // max: 730
-        const int NUM_STRATA = 5;
-        const float MAX_WAVELENGH = 730.f;
-        const float MIN_WAVELENGH = 380.f;
-        const float WAVELENGTH_RANGE = MAX_WAVELENGH - MIN_WAVELENGH;
-        float strataStart = ( shaderData.frameCount % NUM_STRATA ) / (float) NUM_STRATA;
-        float strataEnd = (1.f + ( shaderData.frameCount % NUM_STRATA )) / (float) NUM_STRATA;
+        static const int NUM_STRATA = 5;
+        static const float MAX_WAVELENGH = 730.f;
+        static const float MIN_WAVELENGH = 380.f;
+        static const float WAVELENGTH_RANGE = MAX_WAVELENGH - MIN_WAVELENGH;
+        static const float STRATA_SIZE = 1.f / NUM_STRATA;
+        float strataStart = (shaderData.frameCount % NUM_STRATA) / (float)NUM_STRATA;
+        float wavelength = MIN_WAVELENGH + ((strataStart + (rand_float() * STRATA_SIZE)) * WAVELENGTH_RANGE);
 
-        ray = makeRay(rayIndex, origin, direction, MIN_WAVELENGH + (strataStart * WAVELENGTH_RANGE), MIN_WAVELENGH + (strataEnd * WAVELENGTH_RANGE));
+        ray = makeRay(rayIndex, origin, direction, wavelength);
         validRay = true;
     }
     else
