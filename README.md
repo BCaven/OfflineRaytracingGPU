@@ -141,7 +141,8 @@ The number of rays accumulated per image is controlled by `wrapper.numFramesPerF
 
 The scene is rebuilt between each subsequent time step in the animation.
 
-## Stratified Wavelengths and Progressive Rendering {#progressive}
+<a name="progressive"></a>
+## Stratified Wavelengths and Progressive Rendering
 
 To reduce the number of frames needed to converge on a correct image, the wavelengths are stratified. \
 The default number of bins is 5.
