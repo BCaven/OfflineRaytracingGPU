@@ -92,40 +92,6 @@ void VK_Wrap::init()
 
 	loadStructuredBuffer("transforms", transforms);
 
-	if (bThreaded)
-	{
-		std::cout << "Loading threaded nodes!\n";
-		auto prevRoot = shaderData.sceneRoot;
-		glm::vec3 sceneMin(-FLT_MAX);
-		glm::vec3 sceneMax(FLT_MAX);
-		if (unpackType(prevRoot) != BVH_NODE && unpackType(prevRoot) != KDOP_NODE_BINARY)
-		{
-			std::cout << "Hey! you are trying to load a tree that does not have a bvh node as the root!!!\n";
-		} 
-		else if (unpackType(prevRoot) == BVH_NODE)
-		{
-			auto node = bvhNodes[unpackIndex(prevRoot)];
-			sceneMin = make_aabb_min(node.left.min, node.right.min);
-			sceneMax = make_aabb_max(node.left.max, node.right.max);
-		}
-		auto root = buildThreadedBVH2(prevRoot, sceneMin, sceneMax, SENTINEL_REF, -1);
-		std::cout << "finished building threaded nodes!\n";
-
-		if (root.transformIndex >= 0)   // root is TRANSFORM -> BVH_NODE: traversal starts in world space
-		{
-			//int idx = (int)threadedNodes.size();
-			//threadedNodes.push_back(tbvhNode{ sceneMin, sceneMax, root.retNode, SENTINEL_REF, -1, root.transformIndex });
-			//root.retNode = packChild(PrimType::THREADED_NODE, idx);
-		}
-		
-		std::cout << "Num aabb stack nodes: " << bvhNodes.size() << "\n";
-		std::cout << "Num kdop stack nodes: " << kdopNodes.size() << "\n";
-		std::cout << "Num threaded nodes: " << threadedNodes.size() << "\n";
-		std::cout << "Num kdop threaded nodes: " << threadedKDopNodes.size() << "\n";
-
-		shaderData.sceneRoot = root.retNode;
-	}
-
 	loadStructuredBuffer("threadedNodes", threadedNodes);
 	loadStructuredBuffer("threadedKDopNodes", threadedKDopNodes);
 	loadStructuredBuffer("transformMats", threadedMatrices);
@@ -1411,6 +1377,11 @@ void VK_Wrap::getChildMinMax(const Transform& transform, glm::vec3& min, glm::ve
 	{
 
 	}
+	else if (prim == THREADED_NODE)
+	{
+		min = make_aabb_min(min, threadedNodes[transform.childIndex].min);
+		max = make_aabb_max(max, threadedNodes[transform.childIndex].max);
+	}
 	else
 	{
 		throw std::runtime_error("Not a supported type: " + transform.childPrim);
@@ -2150,50 +2121,8 @@ static bool isPrimRef(PackedRef r)
 		&& t != PrimType::TRANSFORM;
 }
 
-ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm::vec3 boxMax,
-	PackedRef missRef, int missT)
+ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, PackedRef missRef)
 {
-	// collapse TRANSFORM chain: hitMat = box space -> content space,
-	// missMat = miss target re-expressed relative to the content space
-	// Collapse the TRANSFORM chain.
-	//
-	// hitMat maps from the incoming box space to the content space.
-	// missMat stores the inverse of the transition from content space
-	// to the miss continuation, because traversal inverts miss matrices.
-
-	glm::mat4 hitMat(1.0f);
-	bool crossed = false;
-
-	while (unpackType(ref) == PrimType::TRANSFORM)
-	{
-		const Transform& t = transforms[unpackIndex(ref)];
-
-		// Incoming box space -> transformed content space.
-		hitMat = t.invMatrix * hitMat;
-
-		ref = packChild(t.childPrim, t.childIndex);
-		crossed = true;
-	}
-
-	int hitT = crossed ? registerMatrix(hitMat) : -1;
-
-	int contentMissT = missT;
-
-	if (crossed)
-	{
-		// Incoming box space -> miss destination.
-		glm::mat4 oldMissMat =
-			(missT >= 0)
-			? threadedMatrices[missT]
-			: glm::mat4(1.0f);
-
-		// Content space -> miss destination.
-		glm::mat4 contentMissMat =
-			oldMissMat * glm::inverse(hitMat);
-
-		contentMissT = registerMatrix(contentMissMat);
-	}
-
 	if (unpackType(ref) == PrimType::BVH_NODE)
 	{
 		int ci = unpackIndex(ref);
@@ -2225,13 +2154,13 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 			node.packedChild = lRef;                       // inline primitive
 			node.packedSibling = isPrimRef(rRef)
 				? rRef                                     // prim + prim: both inline
-				: buildThreadedBVH2(rRef, glm::vec3(0), glm::vec3(0), missRef, -1).retNode;        // prim + subtree: exits to our miss
+				: buildThreadedBVH2(rRef, missRef).retNode;        // prim + subtree: exits to our miss
 		}
 		else
 		{
 			// subtree + subtree: left exits into right, right exits to our miss
-			PackedRef right = buildThreadedBVH2(rRef, glm::vec3(0), glm::vec3(0), missRef, -1).retNode;
-			PackedRef left = buildThreadedBVH2(lRef, glm::vec3(0), glm::vec3(0), right, -1).retNode;
+			PackedRef right = buildThreadedBVH2(rRef, missRef).retNode;
+			PackedRef left = buildThreadedBVH2(lRef, right).retNode;
 			node.packedChild = left;
 		}
 
@@ -2256,10 +2185,6 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 		// primitive goes first so its "next" can be the sibling subtree
 		if (isPrim(rRef) && !isPrim(lRef)) { std::swap(lRef, rRef); std::swap(lBox, rBox); }
 
-		auto boxOf = [](const auto& k, glm::vec3& mn, glm::vec3& mx) {
-			for (int i = 0; i < 3; i++) { mn[i] = k.min[i]; mx[i] = k.max[i]; }
-			};
-
 		kdopThreaded tNode{};
 		tNode.packedMiss = missRef;
 		tNode.packedSibling = SENTINEL_REF; // whatever your "none" value is
@@ -2273,18 +2198,14 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 			}
 			else
 			{
-				glm::vec3 mn, mx; boxOf(*rBox, mn, mx);
-				auto right = buildThreadedBVH2(rRef, mn, mx, missRef, contentMissT);
+				auto right = buildThreadedBVH2(rRef, missRef);
 				tNode.packedSibling = right.retNode;
 			}
 		}
 		else
 		{
-			glm::vec3 mn, mx;
-			boxOf(*rBox, mn, mx);
-			auto right = buildThreadedBVH2(rRef, mn, mx, missRef, contentMissT);
-			boxOf(*lBox, mn, mx);
-			auto left = buildThreadedBVH2(lRef, mn, mx, right.retNode, right.transformIndex);
+			auto right = buildThreadedBVH2(rRef, missRef);
+			auto left = buildThreadedBVH2(lRef, right.retNode);
 			tNode.packedChild = left.retNode;
 		}
 
@@ -2294,18 +2215,16 @@ ThreadedWrapper VK_Wrap::buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm:
 
 		int idx = (int)threadedKDopNodes.size();
 		threadedKDopNodes.push_back(tNode);
-		return { packChild(PrimType::THREADED_KDOP, idx), hitT };
+		return { packChild(PrimType::THREADED_KDOP, idx) };
+	}
+	else
+	{
+		throw std::runtime_error("ThreadedBuilder: Not a supported type");
 	}
 
-	// primitive: its own node, tested in the *box* space, so miss stays relative to missT
-	std::cout << "HEY WE HIT A PRIMITIVE!\n";
-	int idx = (int)threadedNodes.size();
-	threadedNodes.push_back(tbvhNode{
-		.min = boxMin, .max = boxMax,
-		.packedChild = ref,
-		.packedMiss = missRef,
-		.packedSibling = SENTINEL_REF});
-	return { packChild(PrimType::THREADED_NODE, idx), -1 };
+	std::cout << "HEY WE SLIPPED THROUGH!\n";
+
+	return { packChild(PrimType::EMPTY, 0), -1 };
 }
 
 PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
@@ -2378,6 +2297,10 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 			break;
 		case KDOP_NODE_BINARY:
 			
+			break;
+		case THREADED_NODE:
+			min = threadedNodes[index].min;
+			max = threadedNodes[index].max;
 			break;
 		default:
 			//std::cout << "Oops something else\n";
@@ -2465,6 +2388,11 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 		case KDOP_NODE_BINARY:
 
 			break;
+		case THREADED_NODE:
+			min = threadedNodes[index].min;
+			max = threadedNodes[index].max;
+			dop = kdopFromAABB(min, max);
+			break;
 		default:
 			//std::cout << "Oops something else\n";
 
@@ -2511,54 +2439,11 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
 		std::cout << "Loading aabb\n";
 		int firstIndex = bvhNodes.size();
 		auto binaryAABB = buildLBVH(leavesAABB);
-		int lastIndex = bvhNodes.size();
-		int kdopRoot = kdopNodes.size();
-		std::cout << "Converting to kdop\n";
-		std::cout << "num bvhNodes: " << lastIndex - firstIndex << "\n";
-		std::cout << "first index: " << firstIndex << "\n" << "last index: " << lastIndex << "\n";
-		std::cout << "Starting number of kdop nodes: " << kdopNodes.size() << "\n";
-
-		for (int i = firstIndex; i < lastIndex; i++)
-		{
-			const auto& aabbNode = bvhNodes[i];
-			K14Dop l;
-			K14Dop r;
-
-			for (int j = 0; j < 3; j++)
-			{
-				l.max[j] = aabbNode.left.max[j];
-				l.min[j] = aabbNode.left.min[j];
-				r.max[j] = aabbNode.right.max[j];
-				r.min[j] = aabbNode.right.min[j];
-			}
-
-			PrimType tl = KDOP_NODE_BINARY;
-			PrimType tr = KDOP_NODE_BINARY;
-
-			if (aabbNode.left.type != BVH_NODE)
-			{
-				tl = aabbNode.left.type;
-			}
-			if (aabbNode.right.type != BVH_NODE)
-			{
-				tr = aabbNode.right.type;
-			}
-
-			kdopNodes.push_back(KDopNode{
-				.packedIndexType_left = packChild(tl, aabbNode.left.index),
-				.packedIndexType_right = packChild(tr, aabbNode.right.index),
-				.kDop_left = l,
-				.kDop_right = r
-				});
-		}
-		std::cout << "new number of kdop nodes: " << kdopNodes.size() << "\n";
-
-		std::cout << "Flattening kdop\n";
-
-		index = flattenKDop(kdopRoot);
+		
+		index = unpackIndex(binaryAABB);
 
 		//index = ;
-		t = KDOP_NODE;
+		t = BVH_NODE;
 	}
 
 	return packChild(t, index);
@@ -2670,6 +2555,7 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	}
 	int index = 0;
 	PrimType t = EMPTY;
+	/*
 	if (useKdop)
 	{
 		std::cout << "Loading kdop\n";
@@ -2698,326 +2584,27 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
 	{
 		std::cout << "Loading aabb\n";
 		int firstIndex = bvhNodes.size();
-		auto binaryAABB = buildLBVH(leavesAABB);
-		int lastIndex = bvhNodes.size();
-		int kdopRoot = kdopNodes.size();
-		std::cout << "Converting to kdop\n";
-		std::cout << "num bvhNodes: " << lastIndex - firstIndex << "\n";
-		std::cout << "first index: " << firstIndex << "\n" << "last index: " << lastIndex << "\n";
-		std::cout << "Starting number of kdop nodes: " << kdopNodes.size() << "\n";
+		index = unpackIndex(buildLBVH(leavesAABB));
 
-		for (int i = firstIndex; i < lastIndex; i++)
-		{
-			const auto& aabbNode = bvhNodes[i];
-			K14Dop l;
-			K14Dop r;
-
-			for (int j = 0; j < 3; j++)
-			{
-				l.max[j] = aabbNode.left.max[j];
-				l.min[j] = aabbNode.left.min[j];
-				r.max[j] = aabbNode.right.max[j];
-				r.min[j] = aabbNode.right.min[j];
-			}
-
-			PrimType tl = KDOP_NODE_BINARY;
-			PrimType tr = KDOP_NODE_BINARY;
-
-			if (aabbNode.left.type != BVH_NODE)
-			{
-				tl = aabbNode.left.type;
-			}
-			if (aabbNode.right.type != BVH_NODE)
-			{
-				tr = aabbNode.right.type;
-			}
-
-			kdopNodes.push_back(KDopNode{
-				.packedIndexType_left = packChild(tl, aabbNode.left.index),
-				.packedIndexType_right = packChild(tr, aabbNode.right.index),
-				.kDop_left = l,
-				.kDop_right = r
-				});
-		}
-		std::cout << "new number of kdop nodes: " << kdopNodes.size() << "\n";
-
-		std::cout << "Flattening kdop\n";
-
-		index = flattenKDop(kdopRoot);
 
 		//index = ;
-		t = KDOP_NODE;
+		t = BVH_NODE;
 	}
+	*/
+	std::cout << "Loading aabb\n";
+	int firstIndex = bvhNodes.size();
+	auto binaryAABB = buildLBVH(leavesAABB);
+	
 
-	return packChild(t, index);
-}
-
-PackedRef VK_Wrap::loadSplatAABB(std::string filepath)
-{
-	std::cout << "Loading " << filepath << "\n";
-	// same as obj loader in terms of BLAS and TLAS
-	std::vector<bvhNode> tmpNodes{};
-	std::ifstream file(filepath, std::ios::binary);
-	if (!file) {
-		throw std::runtime_error("Could not open PLY file: " + filepath);
-	}
-
-	std::string line;
-	if (!std::getline(file, line) || line != "ply") {
-		throw std::runtime_error("Not a PLY file: " + filepath);
-	}
-
-	bool sawFormat = false;
-	bool inVertex = false;
-	std::size_t vertexCount = 0;
-	std::size_t rowStride = 0;
-	std::vector<plyDetail::Property> properties;
-
-	while (std::getline(file, line)) {
-		if (!line.empty() && line.back() == '\r') {
-			line.pop_back();
-		}
-
-		if (line == "end_header") {
-			break;
-		}
-
-		std::vector<std::string> words = plyDetail::splitWords(line);
-		if (words.empty() || words[0] == "comment") {
-			continue;
-		}
-
-		if (words[0] == "format") {
-			if (words.size() < 3 || words[1] != "binary_little_endian") {
-				throw std::runtime_error("Only binary_little_endian PLY files are supported");
-			}
-			sawFormat = true;
-			continue;
-		}
-
-		if (words[0] == "element") {
-			if (words.size() < 3) {
-				throw std::runtime_error("Malformed PLY element line: " + line);
-			}
-			inVertex = words[1] == "vertex";
-			if (inVertex) {
-				vertexCount = static_cast<std::size_t>(std::stoull(words[2]));
-			}
-			continue;
-		}
-
-		if (inVertex && words[0] == "property") {
-			if (words.size() < 3 || words[1] == "list") {
-				throw std::runtime_error("Only scalar vertex properties are supported");
-			}
-
-			plyDetail::Property property;
-			property.name = words[2];
-			property.type = words[1];
-			property.offset = rowStride;
-			property.size = plyDetail::scalarSize(property.type);
-			rowStride += property.size;
-			properties.push_back(property);
-		}
-	}
-
-	if (!sawFormat) {
-		throw std::runtime_error("PLY file is missing a format line");
-	}
-	if (vertexCount == 0) {
-		throw std::runtime_error("PLY file has no vertex records");
-	}
-
-	std::unordered_map<std::string, std::size_t> lookup;
-	for (std::size_t i = 0; i < properties.size(); ++i) {
-		lookup[properties[i].name] = i;
-	}
-
-	const plyDetail::Property& x = plyDetail::requireProperty(lookup, properties, "x");
-	const plyDetail::Property& y = plyDetail::requireProperty(lookup, properties, "y");
-	const plyDetail::Property& z = plyDetail::requireProperty(lookup, properties, "z");
-	const plyDetail::Property& dcR = plyDetail::requireProperty(lookup, properties, "f_dc_0");
-	const plyDetail::Property& dcG = plyDetail::requireProperty(lookup, properties, "f_dc_1");
-	const plyDetail::Property& dcB = plyDetail::requireProperty(lookup, properties, "f_dc_2");
-	const plyDetail::Property& opacity = plyDetail::requireProperty(lookup, properties, "opacity");
-	const plyDetail::Property& scale0 = plyDetail::requireProperty(lookup, properties, "scale_0");
-	const plyDetail::Property& scale1 = plyDetail::requireProperty(lookup, properties, "scale_1");
-	const plyDetail::Property& scale2 = plyDetail::requireProperty(lookup, properties, "scale_2");
-	const plyDetail::Property& rot0 = plyDetail::requireProperty(lookup, properties, "rot_0");
-	const plyDetail::Property& rot1 = plyDetail::requireProperty(lookup, properties, "rot_1");
-	const plyDetail::Property& rot2 = plyDetail::requireProperty(lookup, properties, "rot_2");
-	const plyDetail::Property& rot3 = plyDetail::requireProperty(lookup, properties, "rot_3");
-
-	std::vector<const plyDetail::Property*> shRest;
-	for (int i = 0; i < SH_REST_FLOAT_COUNT; ++i) {
-		auto it = lookup.find("f_rest_" + std::to_string(i));
-		if (it == lookup.end()) {
-			break;
-		}
-		shRest.push_back(&properties[it->second]);
-	}
-	if (lookup.find("f_rest_" + std::to_string(SH_REST_FLOAT_COUNT)) != lookup.end()) {
-		throw std::runtime_error(
-			"PLY has more spherical harmonic coefficients than this loads");
-	}
-
-	if (shRest.size() % SH_CHANNEL_COUNT != 0) {
-		throw std::runtime_error(
-			"PLY f_rest_* properties must contain the same count per RGB channel");
-	}
-
-	const std::size_t restCountPerChannel = shRest.size() / SH_CHANNEL_COUNT;
-	if (restCountPerChannel == 0)
-	{
-		throw std::runtime_error(
-			"Failed to parse - restCountPerChannel was zero!"
-		);
-	}
-	std::vector<unsigned char> row(rowStride);
-
-
-	std::vector<LeafItem> leaves;
-	for (std::size_t i = 0; i < vertexCount; ++i) {
-		file.read(reinterpret_cast<char*>(row.data()), static_cast<std::streamsize>(row.size()));
-		if (!file) {
-			throw std::runtime_error("PLY ended before all vertex records were read");
-		}
-
-		glm::vec3 center(
-			plyDetail::readAsFloat(row, x),
-			plyDetail::readAsFloat(row, y),
-			plyDetail::readAsFloat(row, z)
-		);
-		std::array<float, SH_FLOAT_COUNT> sphericalHarmonics = {};
-
-
-		sphericalHarmonics[0] = plyDetail::readAsFloat(row, dcR);
-		sphericalHarmonics[1] = plyDetail::readAsFloat(row, dcG);
-		sphericalHarmonics[2] = plyDetail::readAsFloat(row, dcB);
-		for (std::size_t channel = 0; channel < SH_CHANNEL_COUNT; ++channel) {
-			for (std::size_t coeff = 0; coeff < restCountPerChannel; ++coeff) {
-				std::size_t plyRestIndex = channel * restCountPerChannel + coeff;
-				std::size_t splatCoeff = coeff + 1;
-				std::size_t splatIndex = splatCoeff * SH_CHANNEL_COUNT + channel;
-				sphericalHarmonics[splatIndex] =
-					plyDetail::readAsFloat(row, *shRest[plyRestIndex]);
-			}
-		}
-		float raw_alpha = plyDetail::readAsFloat(row, opacity);
-		float alpha = 1.0 / (1.0 + std::exp(-raw_alpha));
-		glm::vec3 scale(
-			std::exp(plyDetail::readAsFloat(row, scale0)),
-			std::exp(plyDetail::readAsFloat(row, scale1)),
-			std::exp(plyDetail::readAsFloat(row, scale2))
-		);
-
-		glm::vec3 invScale2(
-			1.f / (scale.x * scale.x),
-			1.f / (scale.y * scale.y),
-			1.f / (scale.z * scale.z)
-		);
-
-		glm::quat rotation(
-			plyDetail::readAsFloat(row, rot0),
-			plyDetail::readAsFloat(row, rot1),
-			plyDetail::readAsFloat(row, rot2),
-			plyDetail::readAsFloat(row, rot3)
-		);
-		float len = glm::length(rotation);
-
-
-		rotation = glm::normalize(rotation);
-
-		glm::mat3 R = glm::mat3_cast(rotation);
-
-		float detR = glm::determinant(R);
-
-
-
-		float scale_mod = 1;
-		glm::mat3 S(1.0f);
-		S[0][0] = scale.x * scale_mod;
-		S[1][1] = scale.y * scale_mod;
-		S[2][2] = scale.z * scale_mod;
-
-		float eps = 0.2;
-		float k = std::sqrt(-2.0 * std::log(eps)); // radius of ellipsoid in "S" units
-		//std::cout << "Alpha: " << alpha << "\n";
-		// ellipsoid semi-axes in world space = k * s_x, k * s_y, k * s_z along R's columns
-		glm::vec3 axis0 = k * scale.x * glm::vec3(R[0]); // R's basis vectors (columns)
-		glm::vec3 axis1 = k * scale.y * glm::vec3(R[1]);
-		glm::vec3 axis2 = k * scale.z * glm::vec3(R[2]);
-
-		// TODO: these AABBs are probably too big
-		// AABB half-extents = sum of |component| along each world axis
-		glm::vec3 halfExtent(
-			std::abs(axis0.x) + std::abs(axis1.x) + std::abs(axis2.x),
-			std::abs(axis0.y) + std::abs(axis1.y) + std::abs(axis2.y),
-			std::abs(axis0.z) + std::abs(axis1.z) + std::abs(axis2.z)
-		);
-
-		SphericalHarmonic shMat{
-			.degree = SH_REST_FLOAT_COUNT / (int)restCountPerChannel,
-		};
-		for (int i = 0; i < SH_COUNT; i++)
-		{
-			int shIndex = i * SH_CHANNEL_COUNT;
-			shMat.sh[i] = glm::vec3(sphericalHarmonics[shIndex], sphericalHarmonics[shIndex + 1], sphericalHarmonics[shIndex + 2]);
-		}
-		int shIndex = shMats.size();
-		shMats.push_back(shMat);
-
-		// doing it this way because it means less new code on the GPU side
-		// TODO: change how these work so less wasted memory
-		Material mat{
-			.color = glm::vec4(0),
-			.metallicOrIor = 0,
-			.emissiveColor = glm::vec4(0),
-			.SHIndex = shIndex
-		};
-		unsigned int matIndex = materials.size();
-
-		glm::mat3x3 identity(1);
-
-		materials.push_back(mat);
-		GaussianSplat gs{
-			.center = center,
-			.rotation = rotation,
-			.invScale2 = invScale2,
-			.alpha = alpha,
-			.materialIndex = matIndex,
-			.halfExtent = halfExtent
-		};
-		//K14Dop dop = kdopFromGaussianSplat(center, R, scale, k);
-
-		
-		leaves.push_back(LeafItem{
-			.min = center - halfExtent,
-			.max = center + halfExtent,
-			.center = center,
-			.type = PrimType::GAUSSIAN_SPLAT,
-			.index = (int) splats.size()
-			});
-
-		/*
-		leaves.push_back(KDopLeaf{
-			.type = PrimType::GAUSSIAN_SPLAT,
-			.index = (int)splats.size(),
-			.center = center,
-			.kDop = dop
-			});
-			*/
-		splats.push_back(gs);
-	}
-
-	int binaryAABB = buildChildBVH(leaves);
-
-	return packChild(BVH_NODE, binaryAABB);
+	return loadThreaded(binaryAABB);
 }
 
 PackedRef VK_Wrap::loadSplat(std::string filepath)
 {
 	auto leaves = loadSplat_helper(filepath);
+	PackedRef root = packChild(EMPTY, 0);
+
+	/*
 	bool useKDop = false;
 	PackedRef root = packChild(EMPTY, 0);
 	if (useKDop)
@@ -3053,19 +2640,27 @@ PackedRef VK_Wrap::loadSplat(std::string filepath)
 				}
 			);
 		}
-		root = buildLBVH(aabbLeaves);
+		root = loadThreaded(buildLBVH(aabbLeaves));
 	}
-	return root;
-}
-PackedRef VK_Wrap::loadSplatBinary(std::string filepath)
-{
-	auto leaves = loadSplat_helper(filepath);
+	*/
+	std::cout << "converting k-DOP to AABB\n";
+	std::vector<LeafItem> aabbLeaves;
+	for (const auto& l : leaves)
+	{
+		aabbLeaves.push_back(
+			LeafItem{
+				.min = glm::vec3(l.kDop.min[0], l.kDop.min[1], l.kDop.min[2]),
+				.max = glm::vec3(l.kDop.max[0], l.kDop.max[1], l.kDop.max[2]),
+				.center = l.center,
+				.type = l.type,
+				.index = l.index
+			}
+		);
+	}
+	//std::cout << "Loading aabb\n";
+	auto binaryAABB = buildLBVH(aabbLeaves);
 
-	std::cout << "building tree\n";
-	K14Dop outDop;
-	int binaryKdop = build14DOP_parallel(leaves, 0, leaves.size(), outDop);
-
-	return packChild(KDOP_NODE_BINARY, binaryKdop);
+	return loadThreaded(binaryAABB);
 }
 
 Collection VK_Wrap::loadSplatCollection(std::string filepath)
@@ -3234,7 +2829,7 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
 		rotation = glm::normalize(rotation);
 		glm::mat3 R = glm::mat3_cast(rotation);
 
-		float eps = 0.2f;
+		float eps = 0.1f;
 		float k = std::sqrt(-2.0f * std::log(eps));
 		glm::vec3 axis0 = k * scale.x * glm::vec3(R[0]);
 		glm::vec3 axis1 = k * scale.y * glm::vec3(R[1]);
@@ -3298,6 +2893,29 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
 	for (auto& w : workers) w.join();
 
 	return leaves;
+}
+
+PackedRef VK_Wrap::loadThreaded(PackedRef prevRoot)
+{
+		std::cout << "Loading threaded nodes!\n";
+		glm::vec3 sceneMin(-FLT_MAX);
+		glm::vec3 sceneMax(FLT_MAX);
+		if (unpackType(prevRoot) != BVH_NODE && unpackType(prevRoot) != KDOP_NODE_BINARY)
+		{
+			std::cout << "Hey! you are trying to load a tree that does not have a bvh node as the root!!!\n";
+		}
+		else if (unpackType(prevRoot) == BVH_NODE)
+		{
+			auto node = bvhNodes[unpackIndex(prevRoot)];
+			sceneMin = make_aabb_min(node.left.min, node.right.min);
+			sceneMax = make_aabb_max(node.left.max, node.right.max);
+		}
+		auto root = buildThreadedBVH2(prevRoot, SENTINEL_REF);
+		std::cout << "finished building threaded nodes!\n";
+
+
+		return root.retNode;
+	
 }
 
 void VK_Wrap::updateTransform(PackedRef transformRef, PackedRef newChild)

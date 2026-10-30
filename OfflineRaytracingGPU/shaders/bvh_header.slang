@@ -1,7 +1,6 @@
 implementing scene;
 
-// NOTE: this should be as small as possible :)
-static const uint MAX_TRANSFORM_DEPTH = 4;
+
 
 public struct TraversalNode
 {
@@ -20,12 +19,14 @@ public struct TraversalStack
     public uint lane;
     public uint pt;
 
-    [mutating] void push(TraversalNode node) 
+    [mutating] bool push(TraversalNode node) 
     {
         if (pt < STACK_SIZE)
         {
             rayStack[pt++ * GROUP_SIZE + lane] = node;
+            return true;
         }
+        return false;
     }
     [mutating] TraversalNode pop() 
     {
@@ -59,12 +60,14 @@ public struct TransformStack
     public uint lane;
     public uint pt;
 
-    [mutating] void push(TransformStackNode node)
+    [mutating] bool push(TransformStackNode node)
     {
         if (pt < TRANSFORM_STACK_SIZE)
         {
             transformStack[pt++ * GROUP_SIZE + lane] = node;
+            return true;
         }
+        return false;
     }
     [mutating] TransformStackNode pop()
     {

@@ -150,10 +150,10 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
 
             uint nextIdx = unpackIndex(current.packedMiss);
             PrimType nextType = unpackType(current.packedMiss);
-
-            float hit = scaleT * intersect_aabb(currentRay, current.min, current.max);
+            float rawHit = intersect_aabb(currentRay, current.min, current.max);
+            float hit = scaleT * rawHit;
             bool bHit = false;
-            if (hit < closest.t) // hit and closest
+            if (hit < closest.t && rawHit < FLT_MAX) // hit and closest
             {
                 uint childIdx = unpackIndex(current.packedChild);
                 PrimType childType = unpackType(current.packedChild);

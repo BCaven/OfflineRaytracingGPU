@@ -17,6 +17,8 @@ __include threadedbvh;
 
 __include bvh;
 
+__include mixed_traversal;
+
 
 float gaussian_linear(float lambda, float mu, float sigma)
 {
@@ -62,7 +64,7 @@ public float4 ray_spectral(uint gi, Ray ray, uint sceneRoot, float3 camDir, bool
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
 
-    Intersection intersection = intersect_scene_wide_dfs(gi, ray, rootIndex, rootType); // intersect_scene_threaded(ray, rootIndex, rootType, closest, 1.f, identity3x3()); //
+    Intersection intersection = intersect_scene_mixed( gi, ray, rootIndex, rootType); // intersect_scene_threaded(ray, rootIndex, rootType, closest, 1.f, identity3x3()); //
     if (!valid_intersection(intersection))
     {
         float skySpectral = rgb_to_spectral(sky_color(ray, backgroundColor), ray.wavelength);
@@ -80,7 +82,7 @@ public float4 ray_spectral(uint gi, Ray ray, uint sceneRoot, float3 camDir, bool
     
     if (firstBounceDebug)
     {
-        retColor = intersection.normal; //spectral_sample_to_RGB(spectral.x, ray.wavelength, lambda_pdf);
+        retColor = intersection.normal;
     }
 
     

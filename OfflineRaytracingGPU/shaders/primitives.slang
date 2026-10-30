@@ -610,11 +610,11 @@ uint intersectKDopChildren(
     if (aabbMask == 0u)
         return 0u; // nothing survived phase 1 -- skip the cold fetch entirely
 
-    /*
+    
     // phase 2: only now pull the diagonal-plane data, and only refine
     // the slots that actually need it
     K14DopNodeCold cold = kdopColdNodes[nodeIndex];
-    */
+    
     uint validMask = 0u;
 
     [unroll]
@@ -625,7 +625,7 @@ uint intersectKDopChildren(
 
         float2 ab = aabbBounds[slot];
         // dont use cold nodes
-        float2 refined = ab; // kdop_bounds_diag(localRay, cold.min[slot], cold.max[slot], ab.x, ab.y);
+        float2 refined = kdop_bounds_diag(localRay, cold.min[slot], cold.max[slot], ab.x, ab.y);
 
         if (refined.x == FLT_MAX)
             continue; // diagonal planes rejected it

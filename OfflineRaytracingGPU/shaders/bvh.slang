@@ -2,8 +2,17 @@ implementing scene;
 
 __include bvh_header;
 
+float3x3 buildNormalMatrix(TransformStackNode currentTransform)
+{
+    float3x3 normalMatrix = identity3x3();
 
-
+    for (uint i = 0; i < currentTransform.transformDepth; i++)
+    {
+        float3x3 transformNormal = transpose((float3x3)transforms[currentTransform.transformChain[i]].invMatrix);
+        normalMatrix = mul(normalMatrix, transformNormal);
+    }
+    return normalMatrix;
+}
 
 bool transformRay(TraversalNode node, TransformStackNode transformNode, uint transformIdx, Transform t, out TraversalNode result, out TransformStackNode resultTransformStack)
 {
@@ -44,7 +53,7 @@ void processChild(
     float childT
 )
 {
-    if (childType == PrimType::BVH_NODE || childType == PrimType::KDOP_NODE)
+    if (childType == PrimType::BVH_NODE || childType == PrimType::KDOP_NODE || childType == PrimType::THREADED_NODE || childType == PrimType::TRANSFORM)
     {
         // Dont push a new transform chain to the transform stack since we are just using the same one from before
         TraversalNode childNode;
@@ -54,25 +63,6 @@ void processChild(
         transformStack.increaseNodesUsing(node.transformStackIndex, 1);
 
         stack.push(childNode);
-    }
-    else if (childType == PrimType::TRANSFORM)
-    {
-        Transform t = transforms[childIndex];
-        TransformStackNode transformStackNode = transformStack.get(node.transformStackIndex);
-        TraversalNode resolved;
-        TransformStackNode resolvedStackNode;
-        node.tEntry = childT;
-        // the transformed BVH node
-        if (transformRay(node, transformStackNode, childIndex, t, resolved, resolvedStackNode))
-        {
-            resolvedStackNode.nodesUsingThis = 1;
-            uint newTransformIndex = transformStack.pt;
-            resolved.transformStackIndex = newTransformIndex;
-
-            stack.push(resolved);
-            transformStack.push(resolvedStackNode);
-            
-        }        
     }
     else
     {

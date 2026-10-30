@@ -351,7 +351,7 @@ public:
 		const glm::mat4& sourceWorldToLocal,
 		const glm::mat4& destinationWorldToLocal);
 
-	ThreadedWrapper buildThreadedBVH2(PackedRef ref, glm::vec3 boxMin, glm::vec3 boxMax, PackedRef missRef, int missT);
+	ThreadedWrapper buildThreadedBVH2(PackedRef ref, PackedRef missRef);
 
 	PackedRef loadCollection(std::vector<PackedRef> references);
 
@@ -369,6 +369,8 @@ public:
 	std::vector<KDopLeaf> loadSplat_helper(std::string filepath);
 
 	Collection loadSplatCollection(std::string filepath);
+
+	PackedRef loadThreaded(PackedRef prevRoot);
 
 	void updateTransform(PackedRef transformRef, PackedRef newChild);
 
