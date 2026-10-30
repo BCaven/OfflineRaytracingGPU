@@ -5,7 +5,8 @@
 Interactive progressive spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 
 > **What does "interactive offline" mean?** \
-> This program runs in real-time, but images converges over time. Therefore the viewer is "interactive" while the actual pathtracer is "offline" \
+> This program runs in real-time, but images converges over time. \
+> Therefore the viewer is "interactive" while the actual pathtracer is "offline" \
 > More on this [below](#progressive).
 
 This path tracer uses a compute-shader pipeline with custom BVH traversal algorithms. It does not use hardware RT.
@@ -104,7 +105,7 @@ The following scene
 ### Self-referencing Instances
 
 Arbitrary nested instances also allow for procedurally generated and rendered recursive collections that are recursive collections that are expanded only as needed for what the camera sees. \
-This means fractal structures, and other recursive trees, can be supported by storing a single branch. \
+This means fractal structures, and other recursive trees, can be supported by storing a single branch.
 
 This is only partially supported due to the limited Transform stack.
 
