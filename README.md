@@ -68,7 +68,7 @@ Specifically, the current algorithm introduces register pressure and does not us
 ## Transforms
 
 Transforms are the easiest way to make instances of BLAS. Transforms have a single child that can be any node type (Inner node, Primitive, other transform, etc.).\
-Since transforms point to an arbitrary child, this allows for the construction of nested instances..
+Since transforms point to an arbitrary child, this allows for the construction of nested instances.
 
 ## Nested Instances
 
@@ -104,7 +104,7 @@ The following scene
 
 ### Self-referencing Instances
 
-Arbitrary nested instances also allow for procedurally generated and rendered recursive collections that are recursive collections that are expanded only as needed for what the camera sees. \
+Arbitrary nested instances also allow for procedurally generated and rendered recursive collections that are expanded only as needed for what the camera sees. \
 This means fractal structures, and other recursive trees, can be supported by storing a single branch.
 
 This is only partially supported due to the limited Transform stack.
@@ -172,7 +172,7 @@ On the Tomatoes test splat, changing AABB bounding boxes to include 90% of the e
 
 ### Why is k-DOP so bad?
 
-The currrent implementation heavily increases the memory pressure on an already-memory bound process. This tanks performance and since the Gaussian Splat primitives are generally small and uniformly sized, the benefits of k-DOP are lost when compared to increased memory latency.
+The current implementation heavily increases the memory pressure on an already-memory bound process. This tanks performance and since the Gaussian Splat primitives are generally small and uniformly sized, the benefits of k-DOP are lost when compared to increased memory latency.
 
 ## TLAS/BLAS split
 
@@ -206,11 +206,12 @@ Feldman, Benjamin. (May 2026). “3D Gaussian Splatting in a Weekend”. bfeldma
 Arman Uguray. "Ray Tracing: GPU Edition". https://raytracing.github.io/gpu-tracing/book/RayTracingGPUEdition.html. \
 Vaidyanathan, Karthik, Sven Woop, and Carsten Benthin. "Wide BVH traversal with a short stack." Proceedings of the Conference on High-Performance Graphics. 2019. \
 Káčerik, Martin, and Jiří Bittner. "SAH-Optimized k-DOP Hierarchies for Ray Tracing." Proceedings of the ACM on Computer Graphics and Interactive Techniques 7.3 (2024): 1-16. \
-Willems, Sascha. "How to Vulkan in 2026." https://www.howtovulkan.com/
+Willems, Sascha. "How to Vulkan in 2026." https://www.howtovulkan.com/ \
+Torres, Roberto, Pedro J. Martín, and Antonio Gavilanes. "Ray casting using a roped BVH with CUDA." Proceedings of the 25th Spring Conference on Computer Graphics. 2009.
 
 # Special Thanks
 
-Dan Rehberg - nested instances \
+Dan Rehberg - inspiring the idea of nested instances. \
 Alain Galvan - k-DOP and performance regarding scenes with many overlapping primitives.
 
 # Gallery
