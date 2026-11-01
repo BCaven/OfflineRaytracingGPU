@@ -5,7 +5,7 @@
 Interactive progressive spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
 
 > **What does "interactive offline" mean?** \
-> This program runs in real-time, but images converges over time. \
+> This program runs in real-time, but images converge over time. \
 > Therefore the viewer is "interactive" while the actual pathtracer is "offline" \
 > More on this [below](#progressive).
 
@@ -38,7 +38,7 @@ Arrow keys `right` and `left` move through time. \
 - Compute shader pipeline
 - Animations with variable time step
 - Threaded BVH traversal algorithm
-- 8-wide KDOP BVH traversal algorithm
+- 8-wide k-DOP BVH traversal algorithm
 - 8-wide AABB BVH traversal algorithm
 - Binary AABB BVH traversal algorithm
 - CPU LBVH construction
@@ -48,22 +48,54 @@ Arrow keys `right` and `left` move through time. \
 
 This section does not cover every aspect of the engine. (e.g., triangle and sphere intersections will not be covered)
 
-> All performance metrics are from an RTX 4090 running at 1280x720. \
+> All performance metrics in this README are from an RTX 4090 running at 1280x720. \
 > Timing for each scene was recorded using NVIDIA Nsight Graphics. \
 > Times presented are the average time per frame across the entire 10 bounce traversal sequence.
+> More on [methodology](#methodology) below.
+
+## Overall Architecture
+
+The path tracer runs in a custom compute shader.
+
+It features a short binary AABB stack as a TLAS and a threaded AABB BLAS.
+
+There is also a stack of transformations that keeps track of the transformations applied during traversal. Recursion and nested instances are enabled by keeping a stack of transformations instead of a single world -> local transform.
+
+The TLAS/BLAS is enforced by the threaded construction algorithm not supporting interior nodes (this primarily affects Transform nodes, since they are the easiest way to build nested instances).
+
+Invalid nodes in either acceleration structure are dropped from the traversal path, resulting in them effectively not existing in the scene. However, the constructors are incapable of creating invalid acceleration structures, so this only impacts to hand-constructed structures that are invalid.
+
+In scenarios where the stack would overflow: the node that would be pushed is disgarded. This displays visually as dropped sections of the structure.
+
+At the moment, this path tracer is focused on ray traversal and scene construction. Rays and wavelengths are uniformly generated using white noise. Wavelengths are stratified to reduce the noise of renders with few samples. \
+I am also not focused on a pure performance comparison with traditional flat TLAS/BLAS setups. This path tracer is designed for nested scenes, and the extra architecture is unnecessary in traditional scenes.
+
+Further benchmarks of scenes with their nested equivalents are still required.
+
+For reference:
+| model    | average time per frame | average MRays/s | average time per frame (primary rays) | average MRays/s (primary rays) | 
+| -------- | ---------------------- | --------------- | ------------------------------------- | ------------------------------ |
+| hairball | 129.52 ms              | 7.11            | 148.67 ms                             | 6.20                           |
+
+> Note: the test scene only contains the hairball object, so it is expected for primary rays to perform worse since more of them are competing for memory as opposed to later bounces where most rays do not intersect the model.
 
 ## Threaded Traversal
 
-Early experiments with threaded bvh traversal yielded the following active frame times: \
+Early experiments with threaded bvh traversal yielded the following:
 
-| model         | threaded AABB  | binary AABB stack | 8-wide AABB stack |
-| ------------- | -------------- | ----------------- | ----------------- |
-| Beholder 3M   | 5.81 ms        | 7.24 ms           | 11.21 ms          |
-| Beholder 1.7M | 2.35 ms        | 3.31 ms           | 4.93 ms           |
+| model         | threaded AABB  | binary AABB stack | 8-wide AABB stack | binary AABB stack (algorithm change, stack size 16) | binary AABB stack (algorithm change, stack size 32) |
+| ------------- | -------------- | ----------------- | ----------------- | --------------------------------------------------- | --------------------------------------------------- |
+| Beholder 3M   | 5.81 ms        | 7.24 ms           | 11.21 ms          | 4.22 ms (overflows stack from other angles)         | 5.37 ms                                             |
+| Beholder 1.7M | 2.35 ms        | 3.31 ms           | 4.93 ms           | 2.11 ms (overflows stack from other angles)         | 2.52 ms                                             |
+| Suzanne 0.25M | 2.76 ms        | X                 | X                 | stack overflow                                      | 4.00 ms                                             |
 
-These results are for a single frame, which computes a single bounce for one ray per pixel. \
+> Cells marked `X` were not tested.
+
 There is a lot more to do when optimizing the wide stack nodes. \
 Specifically, the current algorithm introduces register pressure and does not use an optimal sort algorithm. The combination of these makes wide traversal suffer, especially in larger scenes.
+
+After the initial performance benchmarks, the way transformations were handled in the stack based approaches was changed. The performance changes are noted above. \
+However, due to the reality that making the entire traversal algorithm stack based again would require a larger stack size, and larger stack sizes no longer consistently beating threaded BLAS, the small stack TLAS and threaded BLAS architecture was kept.
 
 ## Transforms
 
@@ -157,18 +189,20 @@ Each frame calculates a single bounce and every time a new set of rays is genera
 
 ## k-DOP, wide nodes, and culling
 
-Average frame times across each frame in 10-bounce sequence.
+| model         | threaded AABB | binary AABB   | 8-wide 14-DOP | 8-wide AABB     | binary AABB stack (after algorithm change, stack size 32) |
+| ------------- | ------------- | ------------- | ------------- | --------------- | --------------------------------------------------------- |
+| Tomatoes      | 15.33 ms      | 19.68 ms      | 55.80 ms      | 37.01 ms        |  23.73 ms                                                 |
+| Readingroom   | 84.39 ms      | 89.48 ms      | 740.74 ms     | 158.27 ms       |  88.69 ms                                                 |
 
-| model         | threaded AABB | binary AABB   | 8-wide 14-DOP | 8-wide AABB     |
-| ------------- | ------------- | ------------- | ------------- | --------------- |
-| Tomatoes      | 15.33 ms      | 19.68 ms      | 55.80 ms      | 37.01 ms        |
-| Readingroom   | 84.39 ms      | 89.48 ms      | 740.74 ms     | 158.27 ms       |
+It was unclear why the Tomatoes scene performed worse after the algorithm change and further testing is required.
 
 Originally, I thought there would be more poorly formed splat primitives. This was not the case in the splats I tested. \
 As a result, the TLAS uses binary AABBs and the BLAS uses threaded AABBs.
 
 For the splats, by far the biggest performance difference was changing the maximum bounds. \
 On the Tomatoes test splat, changing AABB bounding boxes to include 90% of the entire distribution made the threaded traversal time increase to 32.55 ms (up from 15.33 ms when the same scene was traversed using bounding boxes that covered 80% of the distribution of each primitive).
+
+The loss in accuracy of reducing the bounding boxes of Gaussian splat primitives was not visibly noticeable in most scenes, and is most obvious in scenes with large non-overlapping splats. This loss in visual accuracy was acceptable given the ~2x performance improvement.
 
 ### Why is k-DOP so bad?
 
@@ -184,6 +218,18 @@ Threaded BLAS handles instances while the stack-based traversal handles transfor
 
 This results in better overall performance than either method alone, and scenes that were previously impossible to render (e.g., 10+ million primitives with multiple instances and transforms).
 
+## Methodology:
+
+This path tracer computes a single ray over the course of 10 frames. \
+Each frame computes a single bounce then records the new state of that ray in a buffer, which is read by the next frame.
+
+When the maximum number of bounces has been reached (default is 10) a new primary ray is generated and the process is repeated.
+
+To fairly compare each traversal algorithm, reported timings are the average frame time across the entire 10 frame sequence. Measurements are repeated randomly in the program's lifetime until they converge (minimum of 3 times) to ensure the reported timings are accurate. \
+Total frame time for all 10 frames in the sequence is recored using Nsight and the average time per frame is computed. \
+Each scene was measured in an identical configuration across each traversal algorithm.
+
+
 # Building and contributing
 
 The project uses [CMake](https://cmake.org/) and requires [Vulkan SDK](https://vulkan.org/tools#download-these-essential-development-tools).\
@@ -194,7 +240,7 @@ tinyexr is included as a git submodule.
 2. Clone repository: `git clone https://github.com/BCaven/OfflineRaytracingGPU.git`
 3. Get tinyexr: `cd OfflineRaytracingGPU && git submodule update --init --recursive`
 4. Build: \
-   with Visual Studio: open `OfflineRaytracingGPU` folder in Visual Studio and select `OfflineRaytracingGPU/CmakeLists.txt` when prompted \
+   with Visual Studio: open `OfflineRaytracingGPU` folder in Visual Studio and select `OfflineRaytracingGPU/CMakeLists.txt` when prompted \
    with CMake: `cmake OfflineRaytracingGPU/ -B OfflineRaytracingGPU/out/ && cmake --build OfflineRaytracingGPU/out/`
 
 Make a pull request if you want to contribute :)

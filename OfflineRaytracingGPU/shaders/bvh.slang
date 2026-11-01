@@ -45,44 +45,32 @@ bool transformRay(TraversalNode node, TransformStackNode transformNode, uint tra
 
 void processChild(
     inout TraversalStack stack,
-    inout TransformStack transformStack,
-    TraversalNode node, 
+    inout CompactTransformStack transformStack,
+    TraversalNode node,
     inout Intersection closest, 
     uint childIndex,
     PrimType childType,
-    float childT
+    float childT,
+    Ray currentRay,
+    float tScale
 )
 {
     if (childType == PrimType::BVH_NODE || childType == PrimType::KDOP_NODE || childType == PrimType::THREADED_NODE || childType == PrimType::TRANSFORM)
     {
-        // Dont push a new transform chain to the transform stack since we are just using the same one from before
         TraversalNode childNode;
         childNode.packedIndexType = packChild(childType, childIndex);
         childNode.tEntry = childT;
-        childNode.transformStackIndex = node.transformStackIndex;
-        transformStack.increaseNodesUsing(node.transformStackIndex, 1);
-
         stack.push(childNode);
     }
     else
     {
-        Ray intersectionRay;
-        TransformStackNode currentTransform = transformStack.get(node.transformStackIndex);
-        intersectionRay.direction = currentTransform.rayDirection;
-        intersectionRay.origin = currentTransform.rayOrigin;
-
-        float3x3 normalMatrix = identity3x3();
-
-        for (uint i = 0; i < currentTransform.transformDepth; i++)
-        {
-            float3x3 transformNormal = transpose((float3x3)transforms[currentTransform.transformChain[i]].invMatrix);
-            normalMatrix = mul(normalMatrix, transformNormal);
-        }
-
-        ProcessPrimitive(childType, childIndex, intersectionRay, closest, normalMatrix, currentTransform.tScale);
+        ProcessPrimitive(childType, childIndex, currentRay, closest, transpose(transformStack.cumulativeTransform), tScale);
     }
 }
 
+// Going to ignore this algorithm for now - need to delete it later
+// TODO: delete this
+/*
 Intersection intersect_scene_wide_dfs(uint gi, Ray startRay, uint rootIndex, PrimType rootType)
 {
     Intersection closest = no_intersection();
@@ -215,3 +203,4 @@ Intersection intersect_scene_wide_dfs(uint gi, Ray startRay, uint rootIndex, Pri
 
     return closest;
 }
+*/

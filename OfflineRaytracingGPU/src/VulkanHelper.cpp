@@ -208,7 +208,7 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 	}
 	wrapper.shaderData.backgroundColor = sky;
 	wrapper.camera.origin = glm::vec3(0, 5, 0);
-	//suzanneCollection.insert(suzanneCollection.end(), lightSpheres.begin(), lightSpheres.end());
+	suzanneCollection.insert(suzanneCollection.end(), lightSpheres.begin(), lightSpheres.end());
 	return wrapper.loadCollection(suzanneCollection);
 }
 
@@ -618,6 +618,7 @@ PackedRef fractal(VK_Wrap& wrapper)
 	wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
 
 	glm::vec4 sky = glm::vec4(0.5);
+	glm::vec4 pastel_blue = glm::vec4(83, 236, 228, 255) / 255.0f;
 	glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
 	glm::vec4 light_1 = 1.f * glm::vec4(83, 236, 228, 255) / 255.0f;
 	glm::vec4 light_2 = 1.f * glm::vec4(181, 150, 243, 255) / 255.0f;
@@ -627,7 +628,8 @@ PackedRef fractal(VK_Wrap& wrapper)
 			Material{ pastel_orange, 0},				// 00
 			Material{ sky, 0 },
 			Material{ sky, 0, 0, light_1 },
-			Material{ sky, 0, 0, light_2 }
+			Material{ sky, 0, 0, light_2 },
+			Material{ pastel_blue, -1.2, 100 }
 	};
 	PackedRef suzanneInstance = wrapper.loadObj("assets/suzanne.obj", 0);
 
@@ -639,11 +641,11 @@ PackedRef fractal(VK_Wrap& wrapper)
 	PackedRef suzanneCollection = wrapper.loadCollection({ suzanneTransform, suzanneTransform2 });
 
 	PackedRef recursiveCollection = wrapper.loadCollection({ suzanneCollection, recursiveTransform});
-	
-	wrapper.updateTransform(recursiveTransform, recursiveCollection);  // need to update transform child once tree has been built
-	
-	std::cout << "recursive collection index: " << unpackIndex(recursiveCollection);
 
+	wrapper.updateTransform(recursiveTransform, recursiveCollection);  // need to update transform child once tree has been built
+
+	std::cout << "recursive collection index: " << unpackIndex(recursiveCollection);
+	
 	if (wrapper.transforms[unpackIndex(recursiveTransform)].childPrim != EMPTY)
 	{
 		std::cout << "recursive transform child was set correctly\n";
@@ -674,7 +676,7 @@ PackedRef fractal(VK_Wrap& wrapper)
 	PackedRef sphereTransform2 = wrapper.loadTransform(glm::vec3(-7, 7, 0), glm::vec3(0), glm::vec3(1), packChild(SPHERE, 1));
 
 	// floor
-	auto floor = wrapper.loadTransform(glm::vec3(0, -1, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_white);
+	auto floor = wrapper.loadTransform(glm::vec3(0, -15, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_white);
 	// ceiling
 	auto ceiling = wrapper.loadTransform(glm::vec3(0, 25, 0), glm::vec3(0, 0, 0), glm::vec3(1), wallIndex_ceiling);
 	// walls
@@ -781,8 +783,8 @@ PackedRef threaded(VK_Wrap& wrapper)
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 
-	auto aabbSplat = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
-	//auto aabbSplat = wrapper.loadSplat("assets/readingroom_1x_180.ply");
+	//auto aabbSplat = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
+	auto aabbSplat = wrapper.loadSplat("assets/readingroom_1x_180.ply");
 	scene.push_back(aabbSplat);
 	auto beholder_glass = wrapper.loadObj("assets/beholder.obj", 6);
 	auto beholder_mat = wrapper.loadObj("assets/beholder.obj", 10);
@@ -826,7 +828,9 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 	//auto splat = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
 	//auto splat = wrapper.loadSplat("assets/readingroom_1x_180.ply");
 	//auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
+	//auto beholder = wrapper.loadObj("assets/beholder.obj", 0);
 	auto hairball = wrapper.loadObj("assets/hairball.obj", 0);
+	//auto suzanne = wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0);
 
 	// splat benchmark
 	auto splat_cam = CameraWrapper{
@@ -837,6 +841,11 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 	// beholder benchmark
 	auto beholder_cam = CameraWrapper{
 	.origin = glm::vec3(0, 2.2, 32),
+	.direction = glm::vec3(0, 0, -1),
+	.fov = 20
+	};
+	auto suzanne_cam = CameraWrapper{
+	.origin = glm::vec3(0, 0, 10),
 	.direction = glm::vec3(0, 0, -1),
 	.fov = 20
 	};
@@ -922,13 +931,13 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 	wrapper.savePath = "renderedFrames/default.exr";
 
-	wrapper.numFramesPerFile = 200;
+	wrapper.numFramesPerFile = 2000;
 	wrapper.numImagesPerSequence = 1;
 	float end_time = 29;
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 10;
+	int choice = 12;
 
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 	wrapper.shaderData.sceneRoot = root;

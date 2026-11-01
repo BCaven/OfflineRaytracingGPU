@@ -12,8 +12,8 @@ public static const float GLASS_F0_SCALAR = 0.04;
 public static const int KDOP_WIDTH = 8;
 
 public static const uint GROUP_SIZE = 64;
-public static const uint STACK_SIZE = 14;
-public static const uint TRANSFORM_STACK_SIZE = 8;
+public static const uint STACK_SIZE = 16;
+public static const uint TRANSFORM_STACK_SIZE = 16;
 // NOTE: this should be as small as possible :)
 static const uint MAX_TRANSFORM_DEPTH = 8;
 
@@ -56,6 +56,8 @@ struct Rng {
 static Rng rng;
 
 // Raytracing
+// TODO: most of the things in this struct are only needed for calculating the *next* ray, not the current ray
+// consider splitting them into two different structs, one with just origin/direction and the other with everything else
 public struct Ray
 {
     public float3 origin;

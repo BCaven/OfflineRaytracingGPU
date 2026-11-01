@@ -100,7 +100,6 @@ void computeMain(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
         // get screen coords from index
         float2 uv = (screenCoords + offset) / shaderData.windowMax;
         uv = (uv - float2(0.5)) * float2(viewport_width, -viewport_height);
-
         uint2 rayIndex = (uint2)screenCoords;
 
         float3 direction = normalize(mul(shaderData.camera.rotationMatrix, float3(uv, focus_distance)));
