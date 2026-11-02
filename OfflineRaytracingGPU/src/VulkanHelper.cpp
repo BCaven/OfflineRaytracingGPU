@@ -829,8 +829,8 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 	//auto splat = wrapper.loadSplat("assets/readingroom_1x_180.ply");
 	//auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
 	//auto beholder = wrapper.loadObj("assets/beholder.obj", 0);
-	auto hairball = wrapper.loadObj("assets/hairball.obj", 0);
-	//auto suzanne = wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0);
+	//auto hairball = wrapper.loadObj("assets/hairball.obj", 0);
+	auto suzanne = wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0);
 
 	// splat benchmark
 	auto splat_cam = CameraWrapper{
@@ -858,7 +858,7 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return hairball;
+	return suzanne;
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)
@@ -931,7 +931,7 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 	wrapper.savePath = "renderedFrames/default.exr";
 
-	wrapper.numFramesPerFile = 2000;
+	wrapper.numFramesPerFile = 200;
 	wrapper.numImagesPerSequence = 1;
 	float end_time = 29;
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;

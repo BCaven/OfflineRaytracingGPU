@@ -78,7 +78,8 @@ void computeMain(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
 {
 
     uint index = threadId.x;
-    uint wrappedIndex = index % (shaderData.windowMax.x * shaderData.windowMax.y);
+    uint2 res = uint2(shaderData.windowMax);
+    uint wrappedIndex = index % (res.x * res.y);
     float2 screenCoords = float2(wrappedIndex % shaderData.windowMax.x, (wrappedIndex - (wrappedIndex % shaderData.windowMax.x)) / shaderData.windowMax.x);
     init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount + index);
 
@@ -98,11 +99,15 @@ void computeMain(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
         float2 offset = float2(rand_float() - 0.5, rand_float() - 0.5);
 
         // get screen coords from index
-        float2 uv = (screenCoords + offset) / shaderData.windowMax;
+        float2 uv = (screenCoords + offset) / float2(shaderData.windowMax.x - 1, shaderData.windowMax.y - 1);
         uv = (uv - float2(0.5)) * float2(viewport_width, -viewport_height);
         uint2 rayIndex = (uint2)screenCoords;
 
         float3 direction = normalize(mul(shaderData.camera.rotationMatrix, float3(uv, focus_distance)));
+
+
+        //currentFrameRGB[rayIndex] = float4((uv.x % 32) / 32, 0, 0, 1);
+        //return;
 
         // stratified wavelengths
         // min: 380

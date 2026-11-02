@@ -130,7 +130,7 @@ void VK_Wrap::init()
 
 	for (auto& [name, b] : bindings)
 	{
-		std::cout << name << " binding " << b.binding << " set " << b.set << '\n';
+		//std::cout << name << " binding " << b.binding << " set " << b.set << '\n';
 	}
 
 	// set countersBuffer
@@ -145,6 +145,8 @@ void VK_Wrap::init()
 	initVertices();
 
 	initShaderData();
+
+	std::cout << "Window dimensions: (" << shaderData.windowMax.x << ", " << shaderData.windowMax.y << ")\n";
 }
 
 void VK_Wrap::clearPrimitives()
@@ -314,7 +316,7 @@ void VK_Wrap::initVMA()
 void VK_Wrap::initSwapchain()
 {
 	// Window and surface
-	window = SDL_CreateWindow("GPU Monte Carlo Raytracing", 1280u, 720u, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+	window = SDL_CreateWindow("GPU Monte Carlo Raytracing", 720u, 720u, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 	assert(window);
 	chk(SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface));
 	chk(SDL_GetWindowSize(window, &windowSize.x, &windowSize.y));
