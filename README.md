@@ -75,7 +75,7 @@ Further benchmarks of scenes with their nested equivalents are still required.
 For reference:
 | model    | average time per frame | average MRays/s | average time per frame (primary rays) | average MRays/s (primary rays) | 
 | -------- | ---------------------- | --------------- | ------------------------------------- | ------------------------------ |
-| hairball | 129.52 ms              | 7.11            | 148.67 ms                             | 6.20                           |
+| ![hairball](ProjectAssets/hairball.png) | 129.52 ms              | 7.11            | 148.67 ms                             | 6.20                           |
 
 > Note: the test scene only contains the hairball object, so it is expected for primary rays to perform worse since more of them are competing for memory as opposed to later bounces where most rays do not intersect the model.
 
