@@ -134,6 +134,8 @@ The following scene
 8 billion instances of Suzanne illuminated by sphere mesh lights:
 ![8 billion Suzannes](ProjectAssets/8b_suzannes_with_lights.png)
 
+> Between [v0-6](https://github.com/BCaven/OfflineRaytracingGPU/releases/tag/v0-6-gifs) and [v0-7](https://github.com/BCaven/OfflineRaytracingGPU/releases/tag/v0-7-mixed) this scene saw a 4.35x performance increase. Average frame time went from 44.35 ms to 10.19 ms.
+
 ### Self-referencing Instances
 
 Arbitrary nested instances also allow for procedurally generated and rendered recursive collections that are expanded only as needed for what the camera sees. \
@@ -144,7 +146,7 @@ This is only partially supported due to the limited Transform stack. However! fo
 Below is initial testing using a collection containing Suzanne and a reference to the collection that has been rotated and scaled, creating a spiral pattern.
 ![initial testing using self references](ProjectAssets/first_fractal.png)
 
-> This scene used to render at 8.16 ms per frame, now it 2.56 ms per frame.
+> This scene used to render at 8.16 ms per frame, after improving the transform stack it runs at 2.56 ms per frame.
 
 ## Gaussian Splat Primitives
 
