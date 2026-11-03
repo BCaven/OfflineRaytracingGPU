@@ -139,12 +139,12 @@ The following scene
 Arbitrary nested instances also allow for procedurally generated and rendered recursive collections that are expanded only as needed for what the camera sees. \
 This means fractal structures, and other recursive trees, can be supported by storing a single branch.
 
-This is only partially supported due to the limited Transform stack.
+This is only partially supported due to the limited Transform stack. However! following a algorithm change to how Transform nodes are stored, tracked, and reconstructed, performance has increased 3x. \
 
 Below is initial testing using a collection containing Suzanne and a reference to the collection that has been rotated and scaled, creating a spiral pattern.
 ![initial testing using self references](ProjectAssets/first_fractal.png)
 
-> This scene renders at 8.16 ms per frame
+> This scene used to render at 8.16 ms per frame, now it 2.56 ms per frame.
 
 ## Gaussian Splat Primitives
 
