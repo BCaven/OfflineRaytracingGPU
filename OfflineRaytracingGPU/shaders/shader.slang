@@ -78,8 +78,7 @@ void computeMain(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
 {
 
     uint index = threadId.x;
-    uint2 res = uint2(shaderData.windowMax);
-    uint wrappedIndex = index % (res.x * res.y);
+    uint wrappedIndex = index % (shaderData.windowMax.x * shaderData.windowMax.y);
     float2 screenCoords = float2(wrappedIndex % shaderData.windowMax.x, (wrappedIndex - (wrappedIndex % shaderData.windowMax.x)) / shaderData.windowMax.x);
     init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount + index);
 
@@ -94,8 +93,8 @@ void computeMain(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
         float focus_distance = 1.0;
         float aspect_ratio = shaderData.windowMax.x / shaderData.windowMax.y;
         float fov_y = radians(shaderData.camera.fov);
-        float viewport_height = 2 * tan(fov_y * 0.5) * focus_distance;
-        float viewport_width = viewport_height * aspect_ratio;
+        float viewport_width = 2 * tan(fov_y * 0.5) * focus_distance;
+        float viewport_height = viewport_width * aspect_ratio;
         float2 offset = float2(rand_float() - 0.5, rand_float() - 0.5);
 
         // get screen coords from index

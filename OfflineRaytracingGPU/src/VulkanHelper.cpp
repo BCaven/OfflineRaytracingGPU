@@ -931,13 +931,13 @@ int main(int argc, char* argv[])
 	VK_Wrap wrapper;
 	wrapper.savePath = "renderedFrames/default.exr";
 
-	wrapper.numFramesPerFile = 200;
+	wrapper.numFramesPerFile = 2000;
 	wrapper.numImagesPerSequence = 1;
 	float end_time = 29;
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 12;
+	int choice = 11;
 
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 	wrapper.shaderData.sceneRoot = root;

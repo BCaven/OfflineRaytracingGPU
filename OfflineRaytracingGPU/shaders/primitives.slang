@@ -641,6 +641,8 @@ uint intersectKDopChildren(
     return validMask;
 }
 
+
+// TODO: apparently arrays are value (NOT reference) types
 uint sortChildrenByDistance(uint validMask, float tHit[KDOP_WIDTH], out uint sortedSlots[KDOP_WIDTH])
 {
     uint count = 0;

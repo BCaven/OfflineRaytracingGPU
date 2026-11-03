@@ -316,7 +316,7 @@ void VK_Wrap::initVMA()
 void VK_Wrap::initSwapchain()
 {
 	// Window and surface
-	window = SDL_CreateWindow("GPU Monte Carlo Raytracing", 720u, 720u, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+	window = SDL_CreateWindow("GPU Monte Carlo Raytracing", 1280u, 720u, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 	assert(window);
 	chk(SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface));
 	chk(SDL_GetWindowSize(window, &windowSize.x, &windowSize.y));
