@@ -156,10 +156,10 @@ void computeFlat(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
         // generate new ray
         const float3 origin = shaderData.camera.origin;
         static const float focus_distance = 1.0;
-        const float aspect_ratio = shaderData.windowMax.x / shaderData.windowMax.y;
+        const float aspect_ratio = (float) shaderData.windowMax.x / (float) shaderData.windowMax.y;
         const float fov_y = radians(shaderData.camera.fov);
-        const float viewport_width = 2 * tan(fov_y * 0.5) * focus_distance;
-        const float viewport_height = viewport_width * aspect_ratio;
+        const float viewport_height = 2 * tan(fov_y * 0.5) * focus_distance;
+        const float viewport_width = viewport_height * aspect_ratio;
         float2 offset = float2(rand_float() - 0.5, rand_float() - 0.5);
 
         // get screen coords from index
