@@ -137,3 +137,98 @@ void computeMain(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
         currentFrameRGB[ray.index] = retColor;
     }
 }
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)] // TODO: adjust this to match max queue size
+void computeFlat(uint3 threadId: SV_DispatchThreadID, uint gi: SV_GroupIndex)
+{
+    // gather rays
+    const uint index = threadId.x;
+    const uint wrappedIndex = index % (shaderData.windowMax.x * shaderData.windowMax.y);
+    const float2 screenCoords = float2(wrappedIndex % shaderData.windowMax.x, (wrappedIndex - (wrappedIndex % shaderData.windowMax.x)) / shaderData.windowMax.x);
+    init_rng(screenCoords, shaderData.windowMax.x, (shaderData.frameCount * 10) + shaderData.bounceCount + index);
+
+    uint numStartRays = shaderData.windowMax.x * shaderData.windowMax.y;
+    Ray ray;
+    // dont have a thread that is outside the screen generate a ray
+    if ((bool)shaderData.resetRays)
+    {
+        // generate new ray
+        const float3 origin = shaderData.camera.origin;
+        static const float focus_distance = 1.0;
+        const float aspect_ratio = shaderData.windowMax.x / shaderData.windowMax.y;
+        const float fov_y = radians(shaderData.camera.fov);
+        const float viewport_width = 2 * tan(fov_y * 0.5) * focus_distance;
+        const float viewport_height = viewport_width * aspect_ratio;
+        float2 offset = float2(rand_float() - 0.5, rand_float() - 0.5);
+
+        // get screen coords from index
+        float2 uv = (screenCoords + offset) / float2(shaderData.windowMax.x - 1, shaderData.windowMax.y - 1);
+        uv = (uv - float2(0.5)) * float2(viewport_width, -viewport_height);
+        uint2 rayIndex = (uint2)screenCoords;
+
+        float3 direction = normalize(mul(shaderData.camera.rotationMatrix, float3(uv, focus_distance)));
+
+        // currentFrameRGB[rayIndex] = float4((uv.x % 32) / 32, 0, 0, 1);
+        // return;
+
+        // stratified wavelengths
+        // min: 380
+        // max: 730
+        static const int NUM_STRATA = 5;
+        static const float MAX_WAVELENGH = 730.f;
+        static const float MIN_WAVELENGH = 380.f;
+        static const float WAVELENGTH_RANGE = MAX_WAVELENGH - MIN_WAVELENGH;
+        static const float STRATA_SIZE = 1.f / NUM_STRATA;
+        const float strataStart = (shaderData.frameCount % NUM_STRATA) / (float)NUM_STRATA;
+        const float wavelength = MIN_WAVELENGH + ((strataStart + (rand_float() * STRATA_SIZE)) * WAVELENGTH_RANGE);
+
+        ray = makeRay(rayIndex, origin, direction, wavelength);
+    }
+    else
+    {
+        if (!getRay(index, shaderData.bounceCount, ray))
+        {
+            return;
+        }
+    }
+
+    // get collisions
+    Intersection hit = intersect_scene_mixed(gi, ray, shaderData.sceneRoot);
+
+    // process collision
+    static const float lambda_pdf = 1 / (730.f - 380.f);
+    static const float3x3 XYZ_TO_SRGB = float3x3(
+     3.2406, -1.5372, -0.4986,
+    -0.9689, 1.8758, 0.0415,
+     0.0557, -0.2040, 1.0570
+    );
+    float4 retCol = 1.f;
+    if (!valid_intersection(hit))
+    {
+        const float skySpectral = rgb_to_spectral(sky_color(ray, shaderData.backgroundColor), ray.wavelength);
+        const float finalRadiance = ray.emission + ray.scatter * skySpectral;
+
+        retCol.xyz = mul(XYZ_TO_SRGB, spectral_sample_to_RGB(finalRadiance, ray.wavelength, lambda_pdf));
+    }
+    else
+    {
+        const Material material = materials[hit.materialIndex];
+
+        const float2 spectral = scatter_spectral(ray, hit, material, shaderData.camDir, shaderData.bounceCount);
+
+        // conv spectral -> rgb
+        bool firstBounce = (shaderData.bounceCount == 0) && (shaderData.frameCount == 0);
+        if (firstBounce)
+        {
+            retCol.xyz = hit.normal;
+        }
+        else
+        {
+            float3 xyzSample = spectral_sample_to_RGB(spectral.y, ray.wavelength, lambda_pdf);
+            retCol.xyz = mul(XYZ_TO_SRGB, xyzSample);
+        }
+    }
+    // return image
+    currentFrameRGB[ray.index] = retCol;
+}

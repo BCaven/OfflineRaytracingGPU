@@ -89,6 +89,7 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
             bool primHit = ProcessPrimitive(nodeType, index, currentRay, closest, sceneTransform, scaleT);
             return closest;
         }
+        /*
         else if (nodeType == PrimType::THREADED_KDOP)
         {
             // process index collision
@@ -140,6 +141,7 @@ Intersection intersect_scene_threaded(Ray startRay, uint rootIndex, PrimType roo
             index = nextIdx;
             nodeType = nextType;
         }
+        */
         else
         {
             // process index collision

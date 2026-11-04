@@ -12,7 +12,7 @@ Small stack w threaded instances
 
 implementing scene;
 
-Intersection intersect_scene_mixed(uint gi, Ray startRay, uint rootIndex, PrimType rootType)
+public Intersection intersect_scene_mixed(uint gi, Ray startRay, uint packedRoot)
 {
     Intersection closest = no_intersection();
     closest.t = FLT_MAX;
@@ -22,7 +22,7 @@ Intersection intersect_scene_mixed(uint gi, Ray startRay, uint rootIndex, PrimTy
     CompactTransformStack transformStack = { gi, 0 };
 
     TraversalNode root;
-    root.packedIndexType = packChild(rootType, rootIndex);
+    root.packedIndexType = packedRoot;
     root.tEntry = 0;
 
     TraversalStack stack = { gi, 0 };
@@ -48,7 +48,7 @@ Intersection intersect_scene_mixed(uint gi, Ray startRay, uint rootIndex, PrimTy
         PrimType currentType = unpackType(current.packedIndexType);
 
 
-
+        /*
         if (currentType == PrimType::KDOP_NODE)
         {
             KDopNodeHot hot = kdopHotNodes[nodeIndex];
@@ -82,7 +82,8 @@ Intersection intersect_scene_mixed(uint gi, Ray startRay, uint rootIndex, PrimTy
                 );
             }
         }
-        else if (currentType == PrimType::BVH_NODE)
+        */
+        if (currentType == PrimType::BVH_NODE)
         {
             float leftT = FLT_MAX;
             float rightT = FLT_MAX;

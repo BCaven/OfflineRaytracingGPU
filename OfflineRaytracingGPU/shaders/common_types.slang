@@ -68,11 +68,11 @@ public struct Ray
     public uint2 index; // screen space uv index
 };
 
-struct Intersection
+public struct Intersection
 {
-    float3 normal;
-    float t;
-    uint materialIndex;
+    public float3 normal;
+    public float t;
+    public uint materialIndex;
 };
 
 // Materials

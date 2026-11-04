@@ -214,6 +214,7 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 
 PackedRef nested_collections(VK_Wrap& wrapper)
 {
+
 	std::random_device rd;
 	std::mt19937 gen(rd());
 	std::uniform_int_distribution<> rand(0, 10);
@@ -232,17 +233,17 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
-			Material{ pastel_orange, 1},					// 0
+			Material{ pastel_orange, 1 },					// 0
 			Material{ pastel_green, -1.5, 50 },				// 1
 			Material{ pastel_blue, 0.5 },					// 2
-			Material{ pastel_purple, 0, 0, pastel_blue},	// 3
-			Material{ pastel_purple, 0, 0, red},			// 4
-			Material{ white, 0, 0, light_white},			// 5
+			Material{ pastel_purple, 0, 0, pastel_blue },	// 3
+			Material{ pastel_purple, 0, 0, red },			// 4
+			Material{ white, 0, 0, light_white },			// 5
 			Material{ pastel_grey, -1.7, 30 },				// 6
-			Material{ red, 0},								// 7
-			Material{ green, 0},							// 8
-			Material{ white, 0, 0, light_white},			// 9
-			Material{ white, 0},							// 10
+			Material{ red, 0 },								// 7
+			Material{ green, 0 },							// 8
+			Material{ white, 0, 0, light_white },			// 9
+			Material{ white, 0 },							// 10
 			Material{										// 11
 				.color = white,
 				.metallicOrIor = -1.5,
@@ -288,7 +289,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, beholderIndex);
 	//PackedRef readingroomIndex = wrapper.loadSplat("assets/readingroom_20x_180.ply");
 
-	//PackedRef tomatoIndex = wrapper.loadSplat2("assets/tomatoes_10x_180.ply");
+	PackedRef tomatoIndex = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
 
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), glm::vec3(1, -1, 1), suzanneIndex);
 	//wrapper.loadTransform(glm::vec3(0, 3, 0), glm::vec3(0, 0, 0), glm::vec3(1), icosphereIndex);
@@ -313,7 +314,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 	}
 	auto suzanneCollection = wrapper.loadCollection(suzanneRings);
 	//wrapper.loadTransform(glm::vec3(0), glm::vec3(0), glm::vec3(1), readingroomIndex);	
-	//auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(2), tomatoIndex);
+	auto splatCollection = wrapper.loadTransform(glm::vec3(0, -5, 0), glm::vec3(0), glm::vec3(2), tomatoIndex);
 	//wrapper.loadTransform(glm::vec3(0, 0, 0), glm::vec3(0), glm::vec3(1), PrimType::BVH_NODE, tomatoIndex);
 
 	PackedRef prism = wrapper.loadObj("assets/icosphere2.obj", 11);
@@ -335,7 +336,7 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection, /*splatCollection,*/ suzanneCollection});
+	return wrapper.loadCollection({ cornellBox, sphereCollection, prismCollection, splatCollection, suzanneCollection });
 }
 
 PackedRef flat_BLAS_TLAS(VK_Wrap& wrapper)
@@ -924,7 +925,7 @@ PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool res
 	return root;
 }
 
-int main(int argc, char* argv[])
+int render_main(int argc, char* argv[])
 {
 	std::cout << "Hello World!\n";
 
@@ -938,8 +939,10 @@ int main(int argc, char* argv[])
 	wrapper.time = 0;
 
 	int choice = 4;
-
+	auto start = std::chrono::system_clock::now();
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
+
+	std::cout << "Build time (ms): " << since(start).count() << "\n";
 	wrapper.shaderData.sceneRoot = root;
 
 	wrapper.init();
@@ -979,3 +982,29 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
+int build_perf_main(int argc, char* argv[])
+{
+	float total_time = 0;
+	int num_runs = 100;
+	int choice = 4;
+	VK_Wrap wrapper;
+	std::cout << "Running build performance test.\n";
+	for (int i = 0; i < num_runs; i++)
+	{
+		wrapper.clearPrimitives(false);
+
+		auto start = std::chrono::system_clock::now();
+		PackedRef root = pickRoot(wrapper, choice, argc, argv, true);
+		float elapsed = since(start).count();
+		total_time += elapsed;
+	}
+	std::cout << "Average build time for scene " << choice << " = " << total_time / num_runs << " = " << total_time << "/" << num_runs << "\n";
+	wrapper.init();
+	return 0;
+}
+
+int main(int argc, char* argv[])
+{
+	//return build_perf_main(argc, argv);
+	return render_main(argc, argv);
+}

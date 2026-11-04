@@ -259,7 +259,7 @@ public:
 
 	bool getFences();
 
-	void clearPrimitives();
+	void clearPrimitives(bool active = true);
 
 	void reloadPrimitives();
 

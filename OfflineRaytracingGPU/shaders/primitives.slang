@@ -238,7 +238,7 @@ float luminance(float4 rgba)
     return dot(rgba, float4(0.2126, 0.7152, 0.0722, 1));
 }
 
-float rgb_to_spectral(float4 rgb, float lambda)
+public float rgb_to_spectral(float4 rgb, float lambda)
 {
     float rResp = gaussian_log(lambda, 611.0, 0.05);
     float gResp = gaussian_log(lambda, 549.0, 0.06);
@@ -263,7 +263,7 @@ float cauchy_ior(float n_d, float abbeNumber, float lambda_nm)
     return A + B * invSqL;
 }
 
-float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir, int frameIndex)
+public float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir, int frameIndex)
 {
     // TODO: this function needs to push rays to writeQueue
     // probably easiest to return scatter and emission spectral so they can be used, since the input ray is dead
@@ -413,12 +413,12 @@ Intersection no_intersection()
 {
     return Intersection(float3(0), -1, 0);
 }
-bool valid_intersection(Intersection hit)
+public bool valid_intersection(Intersection hit)
 {
     return hit.t > 0 && hit.t != FLT_MAX;
 }
 
-float4 sky_color(Ray ray, float4 backgroundColor)
+public float4 sky_color(Ray ray, float4 backgroundColor)
 {
     float t = 0.5 * (normalize(ray.direction).y + 1.0);
     return backgroundColor; //(1 - t) * float4(1) + t * backgroundColor;

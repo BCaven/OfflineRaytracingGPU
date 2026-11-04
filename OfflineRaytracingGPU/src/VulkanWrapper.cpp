@@ -149,10 +149,12 @@ void VK_Wrap::init()
 	std::cout << "Window dimensions: (" << shaderData.windowMax.x << ", " << shaderData.windowMax.y << ")\n";
 }
 
-void VK_Wrap::clearPrimitives()
+void VK_Wrap::clearPrimitives(bool active)
 {
-	vkDeviceWaitIdle(device);   // ensure no in-flight frame is still reading the old buffers
-
+	if (active)
+	{
+		vkDeviceWaitIdle(device);   // ensure no in-flight frame is still reading the old buffers
+	}
 	spheres.clear();
 	triangles.clear();
 	bvhNodes.clear();
@@ -894,7 +896,7 @@ void VK_Wrap::initComputePipeline()
 		nullptr, 0,
 		VK_SHADER_STAGE_COMPUTE_BIT,
 		shaderModule,
-		"computeMain"
+		"computeFlat"
 	};
 	pipeInfo.layout = pipelineLayout;
 	chk(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeInfo, nullptr, &computePipeline));
