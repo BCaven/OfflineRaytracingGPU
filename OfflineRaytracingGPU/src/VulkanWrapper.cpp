@@ -3207,11 +3207,11 @@ bool VK_Wrap::draw()
 	shaderData.camera.origin = camera.origin;
 	shaderData.camera.fov = camera.fov;
 	shaderData.camDir = glm::normalize(camera.direction);
-	shaderData.bounceCount = 0; //bounces;
+	shaderData.bounceCount = bounces;
 	// TODO: this should be the write counter from the previous run
 	const bool firstBounce = bounces == 0;
-	const bool finalBounce = false; //bounces == maxBounces - 1;
-	shaderData.resetRays = true; //firstBounce;
+	const bool finalBounce = bounces == maxBounces - 1;
+	shaderData.resetRays = firstBounce;
 	++bounces;
 
 	ShaderData uploadedShaderData = shaderData;

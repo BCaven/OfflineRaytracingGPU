@@ -972,7 +972,7 @@ int render_main(int argc, char* argv[])
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 12;
+	int choice = 11;
 	auto start = std::chrono::system_clock::now();
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 
