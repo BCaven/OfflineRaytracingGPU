@@ -53,6 +53,23 @@ This section does not cover every aspect of the engine. (e.g., triangle and sphe
 > Times presented are the average time per frame across the entire 10 bounce traversal sequence.
 > More on [methodology](#methodology) below.
 
+## Current Performance
+
+As the path tracer gets optimized, the numbers in experiments below become outdated. \
+Experiments are marked with which release they are from. \
+This is the current performance of the path tracer:
+
+| model                                    | average time per frame | average MRays/s | average time per frame (primary rays) | average MRays/s (primary rays) | 
+| ---------------------------------------- | ---------------------- | --------------- | ------------------------------------- | ------------------------------ |
+| ![hairball](ProjectAssets/hairball.png)  | 32.64 ms               | 28.23           | 41.75 ms                              | 22.07                          |
+| ![tomato](ProjectAssets/tomatoes.png)    | 11.19 ms               | 82.36           | 6.67 ms                               | 138.17                         |
+| ![room](ProjectAssets/readingroom.png)   | 46.76 ms               | 19.71           | 43.73 ms                              | 21.07                          |
+| ![beholder](ProjectAssets/beholder.png)  | 1.96 ms                | 470.20          | 3.59 ms                               | 256.71                         |
+
+> *Why are primary rays slower for triangle meshes?*: Gaussian Splats use stochastic collisions, so many secondary rays end up in the model (causing longer secondary ray traversals) \
+> triangle meshes have the opposite scenario: most of the secondary rays are sent away from the model and hit nothing, causing larger throughput for secondary rays since most of them miss the scene entirely. \
+> the exception to this pattern is readingroom since the model completely surrounds the camera and the camera looks across the room. This combination results in primary and secondary rays having similar traversal costs since both need to traverse significant portions of the model.
+
 ## Overall Architecture
 
 The path tracer runs in a custom compute shader.
@@ -72,16 +89,9 @@ I am also not focused on a pure performance comparison with traditional flat TLA
 
 Further benchmarks of scenes with their nested equivalents are still required.
 
-For reference:
-| model    | average time per frame | average MRays/s | average time per frame (primary rays) | average MRays/s (primary rays) | 
-| -------- | ---------------------- | --------------- | ------------------------------------- | ------------------------------ |
-| ![hairball](ProjectAssets/hairball.png) | 32.64 ms              | 28.23            | 41.75 ms                             | 22.07                           |
-
-> Note: the test scene only contains the hairball object, so it is expected for primary rays to perform worse since more of them are competing for memory as opposed to later bounces where most rays do not intersect the model.
-
 ## Threaded Traversal
 
-Early experiments with threaded bvh traversal yielded the following:
+Early experiments from [v0-7](https://github.com/BCaven/OfflineRaytracingGPU/releases/tag/v0-7-mixed) with threaded bvh traversal yielded the following:
 
 | model         | threaded AABB  | binary AABB stack | 8-wide AABB stack | binary AABB stack (algorithm change, stack size 16) | binary AABB stack (algorithm change, stack size 32) |
 | ------------- | -------------- | ----------------- | ----------------- | --------------------------------------------------- | --------------------------------------------------- |
@@ -146,7 +156,7 @@ This is only partially supported due to the limited Transform stack. However! fo
 Below is initial testing using a collection containing Suzanne and a reference to the collection that has been rotated and scaled, creating a spiral pattern.
 ![initial testing using self references](ProjectAssets/first_fractal.png)
 
-> This scene used to render at 8.16 ms per frame, after improving the transform stack it runs at 2.56 ms per frame.
+> This scene used to render at 8.16 ms per frame, after improving the transform stack in release [v0-7](https://github.com/BCaven/OfflineRaytracingGPU/releases/tag/v0-7-mixed) it runs at 2.56 ms per frame.
 
 ## Gaussian Splat Primitives
 
@@ -190,6 +200,8 @@ The raw screen recording can be found [here](ProjectAssets/progressive_stratifie
 Each frame calculates a single bounce and every time a new set of rays is generated (every 10 frames) the next bin is used to generate the wavelength of the new rays.
 
 ## k-DOP, wide nodes, and culling
+
+These results are from [v0-7](https://github.com/BCaven/OfflineRaytracingGPU/releases/tag/v0-7-mixed).
 
 | model         | threaded AABB | binary AABB   | 8-wide 14-DOP | 8-wide AABB     | binary AABB stack (after algorithm change, stack size 32) |
 | ------------- | ------------- | ------------- | ------------- | --------------- | --------------------------------------------------------- |

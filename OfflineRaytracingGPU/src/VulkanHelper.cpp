@@ -828,24 +828,31 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 			Material{ pastel_orange, 0 },					// 0
 
 	};
+
 	CameraWrapper cam;
 	PackedRef root;
-	int sceneChoice = 4;
+	int sceneChoice = 1;
 	switch (sceneChoice)
 	{
 	case 0:
 		root = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
 		cam = CameraWrapper{
-			.origin = glm::vec3(0, 0.75, -7),
+			.origin = glm::vec3(0, 0.5, -4),
 			.fov = 20
 		};
 		break;
 	case 1:
 		root = wrapper.loadSplat("assets/readingroom_1x_180.ply");
+		glm::vec3 dir(-0.729, -0.2096, -0.651);
+		dir = glm::normalize(dir);
+		glm::vec3 right = glm::normalize(glm::cross(dir, WORLD_UP));
 		cam = CameraWrapper{
-			.origin = glm::vec3(0, 0.75, -7),
+			.origin = glm::vec3(6.767, 0.96, 6),
+			.direction = dir,
+			.right = right,
 			.fov = 20
 		};
+		sky *= 10.f;
 		break;
 	case 2:
 		root = wrapper.loadObj("assets/half_beholder.obj", 0);
@@ -890,8 +897,8 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 	}
 
 	wrapper.camera = cam;
-
 	wrapper.shaderData.backgroundColor = sky;
+
 
 	return root;
 }
@@ -972,7 +979,7 @@ int render_main(int argc, char* argv[])
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 11;
+	int choice = 12;
 	auto start = std::chrono::system_clock::now();
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 

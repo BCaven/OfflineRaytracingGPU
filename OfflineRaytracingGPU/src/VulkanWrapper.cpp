@@ -3158,20 +3158,17 @@ bool VK_Wrap::getFences()
 
 	if (waitResult == VK_TIMEOUT)
 	{
-		// Either still legitimately working (rare for a frame fence) or the
-		// device reset out from under you. Poke the device to find out which.
-		VkResult probe = vkQueueWaitIdle(queue); // cheap way to force VK_ERROR_DEVICE_LOST to surface
+		// Poke device
+		VkResult probe = vkQueueWaitIdle(queue);
 		if (probe == VK_ERROR_DEVICE_LOST)
 		{
-			//handleDeviceLost(); // recreate device/swapchain/pipelines
 			std::cerr << "Failed to get device. Exiting\n";
 			exit(1);
 		}
-		// else: genuinely still running, decide whether to keep waiting or bail
 	}
 	else
 	{
-		chk(waitResult); // your existing chk() handles VK_SUCCESS/other errors
+		chk(waitResult);
 	}
 
 	chk(vkResetFences(device, 1, &fences[frameIndex]));
@@ -3182,6 +3179,10 @@ bool VK_Wrap::getFences()
 bool VK_Wrap::draw()
 {
 	bool camMoved = false;
+
+	bool onlyPrimaryRays = false;
+
+	camMoved |= onlyPrimaryRays;
 
 	if (readbackFrame == int(frameIndex))
 	{
