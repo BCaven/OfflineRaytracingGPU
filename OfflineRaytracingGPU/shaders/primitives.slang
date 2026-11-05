@@ -109,7 +109,7 @@ float3x3 inverse3x3(float3x3 R)
     return transpose(float3x3(c0, c1, c2)) * invDet;
 }
 
-float4x4 inverseAffine(float4x4 M)
+float4x4 inverseAffine(__ref float4x4 M)
 {
     float3x3 R = (float3x3)M;
     float3 t = float3(M[0][3], M[1][3], M[2][3]);
@@ -424,7 +424,7 @@ public float4 sky_color(Ray ray, float4 backgroundColor)
     return backgroundColor; //(1 - t) * float4(1) + t * backgroundColor;
 }
 
-Intersection intersect_sphere(const Ray ray, Sphere sphere)
+Intersection intersect_sphere(const Ray ray, const Sphere sphere)
 {
     float3 v = sphere.center - ray.origin;
     float a = dot(ray.direction, ray.direction);
@@ -449,7 +449,7 @@ Intersection intersect_sphere(const Ray ray, Sphere sphere)
     return Intersection(N, t, sphere.materialIndex);
 }
 
-Intersection intersect_triangle(const Ray ray, Triangle tri)
+Intersection intersect_triangle(const Ray ray, const Triangle tri)
 {
     float normalDotDir = dot(tri.normal, ray.direction);
     if (abs(normalDotDir) < EPSILON) return no_intersection();
@@ -481,7 +481,7 @@ Intersection intersect_triangle(const Ray ray, Triangle tri)
     return Intersection(tri.normal, t, tri.materialIndex);
 }
 
-Intersection intersect_splat(const Ray ray, GaussianSplat gs, float closest_t)
+Intersection intersect_splat(const Ray ray, const GaussianSplat gs, float closest_t)
 {
     float3 w = ray.direction;
     float3 X = ray.origin - gs.center;
@@ -521,25 +521,23 @@ Intersection intersect_splat(const Ray ray, GaussianSplat gs, float closest_t)
     return Intersection(normal, mean_t, gs.materialIndex);
 }
 
-float2 aabb_bounds(Ray ray, float3 aabb_min, float3 aabb_max)
+float2 aabb_bounds(const Ray ray, const float3 aabb_min, const float3 aabb_max)
 {
     float3 invDir = 1.f / ray.direction;
     float3 t0 = (aabb_min - ray.origin) * invDir;
     float3 t1 = (aabb_max - ray.origin) * invDir;
-    float3 tMin = min(t0, t1);
+    //float3 tMin = min(t0, t1);
     float3 tMax = max(t0, t1);
 
-    float tNear = max(max(tMin.x, tMin.y), tMin.z);
+    float tNear = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
     float tFar = min(min(tMax.x, tMax.y), tMax.z);
 
-    float tHit = max(tNear, EPSILON);
+    tNear = max(tNear, EPSILON);
 
-    bool valid = tFar >= tHit;
-
-    return valid ? float2(tHit, tFar) : float2(FLT_MAX);
+    return tFar >= tNear ? float2(tNear, tFar) : float2(FLT_MAX);
 }
 
-float intersect_aabb(Ray ray, float3 min, float3 max)
+float intersect_aabb(const Ray ray, const float3 min, const float3 max)
 {
     float2 bounds = aabb_bounds(ray, min, max);
     return bounds.x;
@@ -676,9 +674,9 @@ uint sortChildrenByDistance(uint validMask, float tHit[KDOP_WIDTH], out uint sor
 bool ProcessPrimitive(
     PrimType type,
     int index,
-    Ray ray,
+    const Ray ray,
     inout Intersection closest,
-    float3x3 transformMat,
+    const float3x3 transformMat,
     float tScale,
     )
 {

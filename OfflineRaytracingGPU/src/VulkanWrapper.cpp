@@ -97,7 +97,6 @@ void VK_Wrap::init()
 	loadStructuredBuffer("transformMats", threadedMatrices);
 
 	int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
-	uint32_t initialGroupCount = 64;
 	loadStructuredBuffer<Ray>("rayQueueA", {}, maxRaysPerQueue);
 	loadStructuredBuffer<Ray>("rayQueueB", {}, maxRaysPerQueue);
 	loadStructuredBuffer<uint32_t>("counters", std::vector<uint32_t>{0}, 2);
@@ -3208,11 +3207,11 @@ bool VK_Wrap::draw()
 	shaderData.camera.origin = camera.origin;
 	shaderData.camera.fov = camera.fov;
 	shaderData.camDir = glm::normalize(camera.direction);
-	shaderData.bounceCount = bounces;
+	shaderData.bounceCount = 0; //bounces;
 	// TODO: this should be the write counter from the previous run
 	const bool firstBounce = bounces == 0;
-	const bool finalBounce = bounces == maxBounces - 1;
-	shaderData.resetRays = firstBounce;
+	const bool finalBounce = false; //bounces == maxBounces - 1;
+	shaderData.resetRays = true; //firstBounce;
 	++bounces;
 
 	ShaderData uploadedShaderData = shaderData;
@@ -3292,8 +3291,8 @@ bool VK_Wrap::draw()
 		&uploadedShaderData
 	);
 
-	int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
-	uint32_t workgroupSize = 64;
+	int maxRaysPerQueue = windowSize.x * windowSize.y;
+	uint32_t workgroupSize = 32;
 	uint32_t dispatches = (maxRaysPerQueue + workgroupSize - 1) / workgroupSize;
 
 	// [numthreads(64,1,1)] => one invocation per workgroup.
@@ -3861,7 +3860,6 @@ bool VK_Wrap::draw()
 		saveRequested = false;
 
 		int maxRaysPerQueue = windowSize.x * windowSize.y * 4;
-		uint32_t initialGroupCount = 64;
 		loadStructuredBuffer<Ray>("rayQueueA", {}, maxRaysPerQueue);
 		loadStructuredBuffer<Ray>("rayQueueB", {}, maxRaysPerQueue);
 

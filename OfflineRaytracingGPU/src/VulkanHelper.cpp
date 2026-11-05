@@ -330,8 +330,11 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
 
 	wrapper.camera = CameraWrapper{
-		.origin = glm::vec3(0, 0.75, 1),
-		.fov = 20
+		.origin = glm::vec3(26, 0, 1),
+		.direction = glm::vec3(-1, 0, 0),
+		.right = glm::vec3(0, 0, -1),
+		.up = glm::vec3(0, 1, 0),
+		.fov = 25
 	};
 
 	wrapper.shaderData.backgroundColor = sky;
@@ -825,41 +828,72 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 			Material{ pastel_orange, 0 },					// 0
 
 	};
+	CameraWrapper cam;
+	PackedRef root;
+	int sceneChoice = 4;
+	switch (sceneChoice)
+	{
+	case 0:
+		root = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
+		cam = CameraWrapper{
+			.origin = glm::vec3(0, 0.75, -7),
+			.fov = 20
+		};
+		break;
+	case 1:
+		root = wrapper.loadSplat("assets/readingroom_1x_180.ply");
+		cam = CameraWrapper{
+			.origin = glm::vec3(0, 0.75, -7),
+			.fov = 20
+		};
+		break;
+	case 2:
+		root = wrapper.loadObj("assets/half_beholder.obj", 0);
+		cam = CameraWrapper{
+			.origin = glm::vec3(0, 2.2, 32),
+			.direction = glm::vec3(0, 0, -1),
+			.fov = 20
+		};
+		break;
+	case 3:
+		root = wrapper.loadObj("assets/beholder.obj", 0);
+		cam = CameraWrapper{
+			.origin = glm::vec3(0, 2.2, 32),
+			.direction = glm::vec3(0, 0, -1),
+			.fov = 20
+		};
+		break;
+	case 4:
+		root = wrapper.loadObj("assets/hairball.obj", 0);
+		cam = CameraWrapper{
+			.origin = glm::vec3(0, 0, 28),
+			.direction = glm::vec3(0, 0, -1),
+			.fov = 20
+		};
+		break;
+	case 5:
+		root = wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0);
+		cam = CameraWrapper{
+			.origin = glm::vec3(0, 0, 6.7),
+			.direction = glm::vec3(0, 0, -1),
+			.fov = 20
+		};
+		break;
+	default:
+		root = wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0);
+		cam = CameraWrapper{
+			.origin = glm::vec3(0, 0, 6.7),
+			.direction = glm::vec3(0, 0, -1),
+			.fov = 20
+		};
+		break;
+	}
 
-	//auto splat = wrapper.loadSplat("assets/tomatoes_10x_180.ply");
-	//auto splat = wrapper.loadSplat("assets/readingroom_1x_180.ply");
-	//auto beholder = wrapper.loadObj("assets/half_beholder.obj", 0);
-	//auto beholder = wrapper.loadObj("assets/beholder.obj", 0);
-	//auto hairball = wrapper.loadObj("assets/hairball.obj", 0);
-	auto suzanne = wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0);
-
-	// splat benchmark
-	auto splat_cam = CameraWrapper{
-	.origin = glm::vec3(0, 0.75, -7),
-	.fov = 20
-	};
-	
-	// beholder benchmark
-	auto beholder_cam = CameraWrapper{
-	.origin = glm::vec3(0, 2.2, 32),
-	.direction = glm::vec3(0, 0, -1),
-	.fov = 20
-	};
-	auto suzanne_cam = CameraWrapper{
-	.origin = glm::vec3(0, 0, 10),
-	.direction = glm::vec3(0, 0, -1),
-	.fov = 20
-	};
-	auto hairball_cam = CameraWrapper{
-	.origin = glm::vec3(0, 0, 28),
-	.direction = glm::vec3(0, 0, -1),
-	.fov = 20
-	};
-	wrapper.camera = hairball_cam;
+	wrapper.camera = cam;
 
 	wrapper.shaderData.backgroundColor = sky;
 
-	return suzanne;
+	return root;
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)
@@ -932,13 +966,13 @@ int render_main(int argc, char* argv[])
 	VK_Wrap wrapper;
 	wrapper.savePath = "renderedFrames/default.exr";
 
-	wrapper.numFramesPerFile = 2000;
+	wrapper.numFramesPerFile = 200;
 	wrapper.numImagesPerSequence = 1;
 	float end_time = 29;
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 11;
+	int choice = 12;
 	auto start = std::chrono::system_clock::now();
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 
