@@ -151,18 +151,18 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 	glm::vec4 sky = 1.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
 	wrapper.materials = std::vector<Material>{
-		Material{ pastel_orange, 0},				// 0
+		Material{ pastel_orange, 0 },				// 0
 		Material{ pastel_blue, 0.5, 0, pastel_blue * 10.f },				// 2
-		Material{ pastel_purple, 0, 0, pastel_purple * 10.f},	// 3
-		Material{ pastel_green, -1.8, 25, pastel_green * 10.f},				// 1
-		Material{ green, 0, 0, green * 10.f},						// 8
-		Material{ pastel_purple, 0, 0, light_purple},	// 4
-		Material{ pastel_orange, 0, 0, pastel_orange * 10.f},				// 5
+		Material{ pastel_purple, 0, 0, pastel_purple * 10.f },	// 3
+		Material{ pastel_green, -1.8, 25, pastel_green * 10.f },				// 1
+		Material{ green, 0, 0, green * 10.f },						// 8
+		Material{ pastel_purple, 0, 0, light_purple },	// 4
+		Material{ pastel_orange, 0, 0, pastel_orange * 10.f },				// 5
 		Material{ pastel_grey, 0, 0, light_white },					// 6
-		Material{ red, 0, 0, red * 10.f},							// 7
-		Material{ white, 0, 0, white * 10.f}						// 9
+		Material{ red, 0, 0, red * 10.f },							// 7
+		Material{ white, 0, 0, white * 10.f }						// 9
 	};
-	
+
 	for (unsigned int i = 1; i < wrapper.materials.size(); i++)
 	{
 		wrapper.spheres.push_back(Sphere{
@@ -180,7 +180,7 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 		sphereIndex++;
 		sphereIndex = sphereIndex % (wrapper.spheres.size() - 1);
 	}
-	
+
 	PackedRef suzanneInstance = wrapper.loadObj("assets/suzanne.obj", 0);
 
 	std::vector<PackedRef> suzanneCube;
@@ -198,7 +198,7 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 	auto suzanneCubeInstance = wrapper.loadCollection(suzanneCube);
 	std::cout << "Cube instance built\n";
 	std::vector<PackedRef> suzanneCollection;
-	for (float i = -n; i < n; i += step * cubeSize)	for (float j = ( - n * 2) - (step * cubeSize); j < -(step * cubeSize); j += step * cubeSize)	for (float k = -n; k < n; k += step * cubeSize)
+	for (float i = -n; i < n; i += step * cubeSize)	for (float j = (-n * 2) - (step * cubeSize); j < -(step * cubeSize); j += step * cubeSize)	for (float k = -n; k < n; k += step * cubeSize)
 
 	{
 		suzanneCollection.push_back(
@@ -207,7 +207,15 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 
 	}
 	wrapper.shaderData.backgroundColor = sky;
-	wrapper.camera.origin = glm::vec3(0, 5, 0);
+	glm::vec3 dir(0.932, -0.2058, -0.2979);
+	dir = glm::normalize(dir);
+	glm::vec3 right = glm::normalize(glm::cross(dir, WORLD_UP));
+	wrapper.camera = CameraWrapper{
+		.origin = glm::vec3(-2.3, 7.27, 8.96),
+		.direction = dir,
+		.right = right,
+		.fov = 20
+	};
 	suzanneCollection.insert(suzanneCollection.end(), lightSpheres.begin(), lightSpheres.end());
 	return wrapper.loadCollection(suzanneCollection);
 }
@@ -979,7 +987,7 @@ int render_main(int argc, char* argv[])
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 12;
+	int choice = 4;
 	auto start = std::chrono::system_clock::now();
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 
