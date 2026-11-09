@@ -18,5 +18,5 @@ target_include_directories(ktx PUBLIC
 if (APPLE)
     target_link_libraries(ktx PUBLIC $ENV{VULKAN_SDK}/lib/libvulkan.dylib)
 elseif (NOT WIN32)
-    target_link_libraries(ktx PUBLIC $ENV{VULKAN_SDK}/lib/libvulkan.so)
+    target_link_libraries(ktx PUBLIC Vulkan::Vulkan)
 endif()

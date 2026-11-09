@@ -185,7 +185,7 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 
 	std::vector<PackedRef> suzanneCube;
 
-	float cubeSize = n / 100;
+	float cubeSize = n / 100.;
 	float step = 3;
 
 	for (float i = 0; i < cubeSize * step; i += step) for (float j = 0; j < cubeSize * step; j += step) for (float k = 0; k < cubeSize * step; k += step)
@@ -837,9 +837,11 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 
 	};
 
-	CameraWrapper cam;
-	PackedRef root;
-	int sceneChoice = 1;
+  CameraWrapper cam;
+  PackedRef root;
+  int sceneChoice = 6;
+  glm::vec3 dir;
+  glm::vec3 right;
 	switch (sceneChoice)
 	{
 	case 0:
@@ -851,9 +853,9 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 		break;
 	case 1:
 		root = wrapper.loadSplat("assets/readingroom_1x_180.ply");
-		glm::vec3 dir(-0.729, -0.2096, -0.651);
+		dir = glm::vec3(-0.729, -0.2096, -0.651);
 		dir = glm::normalize(dir);
-		glm::vec3 right = glm::normalize(glm::cross(dir, WORLD_UP));
+		right = glm::normalize(glm::cross(dir, WORLD_UP));
 		cam = CameraWrapper{
 			.origin = glm::vec3(6.767, 0.96, 6),
 			.direction = dir,
@@ -895,7 +897,7 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 		};
 		break;
 	default:
-		root = wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0);
+		root = wrapper.loadObj("assets/suzanne.obj", 0);
 		cam = CameraWrapper{
 			.origin = glm::vec3(0, 0, 6.7),
 			.direction = glm::vec3(0, 0, -1),
@@ -987,7 +989,7 @@ int render_main(int argc, char* argv[])
 	wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
 	wrapper.time = 0;
 
-	int choice = 4;
+	int choice = 12;
 	auto start = std::chrono::system_clock::now();
 	PackedRef root = pickRoot(wrapper, choice, argc, argv);
 

@@ -29,6 +29,17 @@ if (MSVC)
     target_compile_options(${NAME} PRIVATE /EHsc)
 endif()
 
+
 set_target_properties(${NAME} PROPERTIES DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 target_compile_features(${NAME} PRIVATE cxx_std_20)
-target_link_libraries(${NAME} PRIVATE ${SDL_LIBRARY} ktx ${Slang_LIBRARY})
+
+if (WIN32)
+   target_link_libraries(${NAME} PRIVATE ${SDL_LIBRARY} ktx ${Slang_LIBRARY})
+elseif (LINUX)
+   target_link_libraries(${NAME} PRIVATE
+      Vulkan::Vulkan
+      SDL3::SDL3
+      TBB::tbb
+      ktx
+      ${Slang_LIBRARY})
+endif()

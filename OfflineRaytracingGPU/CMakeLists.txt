@@ -2,6 +2,8 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 include(FetchContent)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(NAME OfflineRaytracingGPU)
 project(${NAME})
 
@@ -23,7 +25,16 @@ if (NOT WIN32)
     FetchContent_MakeAvailable(GLM)
 endif()
 
-find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
+if (NOT WIN32)
+   find_package(TBB REQUIRED)
+endif()
+
+if (NOT WIN32)
+    find_package(SDL3 REQUIRED CONFIG)
+else()
+    find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
+endif()
+
 find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
 if (NOT EXISTS ${CMAKE_SOURCE_DIR}/external/tinyexr/tinyexr.h)

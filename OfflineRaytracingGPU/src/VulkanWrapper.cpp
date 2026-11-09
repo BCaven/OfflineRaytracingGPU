@@ -715,8 +715,8 @@ void VK_Wrap::initVertices()
 	VmaAllocationInfo vBufferAllocInfo{};
 
 	chk(vmaCreateBuffer(allocator, &bufferCI, &vBufferAllocCI, &vBuffer, &vBufferAllocation, &vBufferAllocInfo));
-	std::memcpy(vBufferAllocInfo.pMappedData, vertices.data(), vBufSize);
-	std::memcpy(((char*)vBufferAllocInfo.pMappedData) + vBufSize, indices.data(), iBufSize);
+	memcpy(vBufferAllocInfo.pMappedData, vertices.data(), vBufSize);
+	memcpy(((char*)vBufferAllocInfo.pMappedData) + vBufSize, indices.data(), iBufSize);
 }
 
 void VK_Wrap::initShaderCompiler()

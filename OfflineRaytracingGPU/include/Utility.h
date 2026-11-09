@@ -1,11 +1,12 @@
 #pragma once
 
 #include "VulkanHelper.h"
-
+#include <unordered_map>
+#include <functional>
 #include <queue>
 #include <mutex>
 #include <thread>
-
+#include <condition_variable>
 constexpr float PI = 3.1415926535;
 constexpr int SH_COUNT = 16;
 constexpr int SH_CHANNEL_COUNT = 3;
@@ -535,7 +536,7 @@ static inline K14Dop kdopFromSphere(const Sphere& s)
 
 static inline PackedRef packChild(PrimType type, int index)
 {
-	return (unsigned int(type) << 28) | (unsigned int(index) & SENTINEL_REF);
+	return (static_cast<unsigned int>(type) << 28) | (static_cast<unsigned int>(index) & SENTINEL_REF);
 }
 
 static inline int unpackIndex(unsigned int packed)
@@ -603,7 +604,7 @@ namespace plyDetail {
 
 	template <typename T> inline T readScalar(const unsigned char* bytes) {
 		T value;
-		std::memcpy(&value, bytes, sizeof(T));
+		memcpy(&value, bytes, sizeof(T));
 		return value;
 	}
 
@@ -774,7 +775,7 @@ static inline void validateKDopNodeHotLayout(slang::TypeLayoutReflection* layout
 
 	auto uniform = ParameterCategory::Uniform;
 
-	assert(std::strcmp(layout->getName(), "KDopNodeHot") == 0);
+	assert(strcmp(layout->getName(), "KDopNodeHot") == 0);
 
 	const size_t expectedSize = sizeof(KDopNodeHot);
 
@@ -790,10 +791,10 @@ static inline void validateKDopNodeHotLayout(slang::TypeLayoutReflection* layout
 	auto* minField = layout->getFieldByIndex(0);
 	auto* maxField = layout->getFieldByIndex(1);
 
-	if (std::strcmp(minField->getName(), "min_packed") != 0)
+	if (strcmp(minField->getName(), "min_packed") != 0)
 		throw std::runtime_error("KDopNodeHot field 0 mismatch");
 
-	if (std::strcmp(maxField->getName(), "max") != 0)
+	if (strcmp(maxField->getName(), "max") != 0)
 		throw std::runtime_error("KDopNodeHot field 1 mismatch");
 
 	printField(
