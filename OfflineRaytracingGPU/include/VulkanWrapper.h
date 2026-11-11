@@ -257,7 +257,7 @@ public:
 		vkDestroyInstance(instance, nullptr);
 	};
 
-	bool getFences();
+	bool getFences(bool quitOnFail = true);
 
 	void clearPrimitives(bool active = true);
 

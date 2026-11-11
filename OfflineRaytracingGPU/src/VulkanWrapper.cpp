@@ -3161,7 +3161,7 @@ VkBufferMemoryBarrier2 VK_Wrap::bufferBarrier(
 }
 
 
-bool VK_Wrap::getFences()
+bool VK_Wrap::getFences(bool quitOnFail)
 {
   // Sync
   constexpr uint64_t FENCE_TIMEOUT_NS = 4'000'000'000ull;
@@ -3172,10 +3172,12 @@ bool VK_Wrap::getFences()
   {
     // Poke device
     VkResult probe = vkQueueWaitIdle(queue);
-    if (probe == VK_ERROR_DEVICE_LOST)
-    {
-      std::cerr << "Failed to get device. Exiting\n";
-      exit(1);
+    if (probe == VK_ERROR_DEVICE_LOST) {
+      if (quitOnFail) {
+        std::cerr << "Failed to get device. Exiting\n";
+        exit(1);
+      }
+      return false;
     }
   }
   else
@@ -3186,6 +3188,7 @@ bool VK_Wrap::getFences()
   chk(vkResetFences(device, 1, &fences[frameIndex]));
 
   chkSwapchain(vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAcquiredSemaphores[frameIndex], VK_NULL_HANDLE, &imageIndex));
+  return true;
 }
 
 bool VK_Wrap::draw()
