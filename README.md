@@ -169,6 +169,24 @@ By averaging samples across many rays, the path tracer simulates alpha blending 
 
 Read more about this type of Gaussian splat ray tracing here: [Stochastic Ray Tracing of Transparent 3D Gaussians](https://arxiv.org/pdf/2504.06598)
 
+### PBR Gaussian splats
+
+PBR materials for Gaussian splats only change the material assigned to individual splats. \
+The actual collision model and corresponding primitive do not change and are still based on [Stochastic Ray Tracing of Transparent 3D Gaussians](https://arxiv.org/pdf/2504.06598).
+
+*So what is new?*
+
+The main idea is to support Gaussian splats that have materials that are not diffuse (which is what the current model assumes). \
+In this path tracer diffuse-only has worked well for example splats that are primarily diffuse, but limits the type of scene that can be represented.
+
+The goal is to support Gaussians that include roughness and metalic properties. \
+As papers come out with better materials, support will be added for those as well.
+
+#### MatSpray Gaussian splats
+
+These are based on the paper [MatSpray](https://matspray.jdihlmann.com/). \
+I am working on a [fork](https://github.com/BCaven/MatSpray) of MatSpray that can support larger scenes while using less VRAM.
+
 ## Time and Animations
 
 Animations are supported by accessing `wrapper.time` during scene construction. \
