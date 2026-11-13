@@ -93,6 +93,7 @@ public struct Sphere
     uint materialIndex;
 };
 
+// TODO: see if recalcing normal out performs the memory call for the larger struct
 public struct Triangle
 {
     float3 v0;
@@ -103,15 +104,11 @@ public struct Triangle
     uint materialIndex;
 };
 
-// TODO: clean up this
-public struct GaussianSplat // packing shenanigans available here. Probably more important to hit fewer of these
+public struct GaussianSplat
 {
-    float3 center;
-    float4 rotation; // TODO: could totally be quaternion instead
-    float3 invScale2;
-    float alpha;
-    uint materialIndex;
-    float3 halfExtent; // TODO: remove this, CPU only - not needed by collision algorithm
+    float4 center_packedAlpha; // alpha is a float
+    float4 rotation; 
+    float4 invScale2_packedMat; // mat is a uint
 };
 
 public struct SphericalHarmonic

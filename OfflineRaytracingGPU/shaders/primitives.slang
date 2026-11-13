@@ -483,9 +483,11 @@ Intersection intersect_triangle(const Ray ray, const Triangle tri)
 
 Intersection intersect_splat(const Ray ray, const GaussianSplat gs, float closest_t)
 {
+    // TODO: there are probably sneaky optimizations that can be done here
+    // this function is ~30% of total frame time in scenes with a lot of splats
+    // slowdown is memory!
     float3 w = ray.direction;
-    float3 X = ray.origin - gs.center;
-
+    float3 X = ray.origin - gs.center_packedAlpha.xyz;
     float3x3 rot = quatToMat(gs.rotation);
 
     float3x3 Rt = transpose(rot);
@@ -493,7 +495,7 @@ Intersection intersect_splat(const Ray ray, const GaussianSplat gs, float closes
     float3 Xl = mul(Rt, X);
     float3 wl = mul(Rt, w);
     float3 wl2 = wl * wl;
-    float3 invScale2 = gs.invScale2;
+    float3 invScale2 = gs.invScale2_packedMat.xyz;
     float A = dot(wl2, invScale2);
     float B = dot(Xl * wl, invScale2);
 
@@ -510,7 +512,7 @@ Intersection intersect_splat(const Ray ray, const GaussianSplat gs, float closes
     float sample = dot(dl * dl, invScale2);
     if (sample > SPLAT_CUTOFF) return no_intersection();
 
-    float alpha = gs.alpha * exp(-0.5 * sample);
+    float alpha = gs.center_packedAlpha.w * exp(-0.5 * sample);
     float roulette = rand_float();
 
     if (roulette >= alpha) return no_intersection();
@@ -518,7 +520,7 @@ Intersection intersect_splat(const Ray ray, const GaussianSplat gs, float closes
     float3 localGradient = dl * invScale2;
     float3 normal = normalize(mul(rot, localGradient));
 
-    return Intersection(normal, mean_t, gs.materialIndex);
+    return Intersection(normal, mean_t, bit_cast<uint>(gs.invScale2_packedMat.w));
 }
 
 float2 aabb_bounds(const Ray ray, const float3 aabb_min, const float3 aabb_max)

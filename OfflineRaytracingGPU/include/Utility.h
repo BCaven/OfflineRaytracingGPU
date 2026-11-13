@@ -186,12 +186,9 @@ struct Material
 
 struct GaussianSplat
 {
-  glm::vec3 center;
+  glm::vec4 center_packedAlpha;
   glm::quat rotation;
-  glm::vec3 invScale2;
-  float alpha;
-  unsigned int materialIndex;
-  glm::vec3 halfExtent;
+  glm::vec4 invScale2_packedMat;
 };
 
 struct SphericalHarmonic

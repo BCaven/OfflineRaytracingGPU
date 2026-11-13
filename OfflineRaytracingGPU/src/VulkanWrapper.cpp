@@ -2283,9 +2283,9 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
       break;
     case GAUSSIAN_SPLAT:
       //std::cout << "Adding a gs node\n";
-
-      min = splats[index].center - splats[index].halfExtent;
-      max = splats[index].center + splats[index].halfExtent;
+      // TODO: fix these
+      //min = splats[index].center_packedAlpha - splats[index].halfExtent;
+      //max = splats[index].center + splats[index].halfExtent;
       break;
     case TRANSFORM:
       //std::cout << "Adding a transform node\n";
@@ -2367,10 +2367,10 @@ PackedRef VK_Wrap::loadCollection(std::vector<PackedRef> references)
       break;
     case GAUSSIAN_SPLAT:
       //std::cout << "Adding a gs node\n";
-
-      min = splats[index].center - splats[index].halfExtent;
-      max = splats[index].center + splats[index].halfExtent;
-      dop = kdopFromGaussianSplat(splats[index].center, glm::mat3_cast(splats[index].rotation), 1.f / glm::sqrt(splats[index].invScale2), 0.01);
+      // TODO: fix these
+      //min = splats[index].center - splats[index].halfExtent;
+      //max = splats[index].center + splats[index].halfExtent;
+      //dop = kdopFromGaussianSplat(splats[index].center, glm::mat3_cast(splats[index].rotation), 1.f / glm::sqrt(splats[index].invScale2), 0.01);
       break;
     case TRANSFORM:
       ///std::cout << "Adding a transform node\n";
@@ -2764,7 +2764,12 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
   const plyDetail::Property& rot3 = plyDetail::requireProperty(lookup, properties, "rot_3");
 
   // TODO: add checkProperty for the PBR fields
-
+  const plyDetail::ValidProperty &base_color_0_check =
+    plyDetail::checkProperty(lookup, properties, "base_color_0");
+  if (base_color_0_check.isValid) {
+    pbr = true;
+    // check the other attributes
+  }
 
   std::vector<const plyDetail::Property*> shRest;
   for (int i = 0; i < SH_REST_FLOAT_COUNT; ++i) {
@@ -2848,6 +2853,7 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
       std::abs(axis0.z) + std::abs(axis1.z) + std::abs(axis2.z)
     );
 
+
     SphericalHarmonic shMat{ .degree = SH_REST_FLOAT_COUNT / (int)restCountPerChannel };
     for (int c = 0; c < SH_COUNT; c++) {
       int shIndex = c * SH_CHANNEL_COUNT;
@@ -2868,15 +2874,13 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
 
         };
       }
-    materials[baseMat + i] = mat;
+    unsigned int matIndex = baseMat + i;
+    materials[matIndex] = mat;
 
     GaussianSplat gs{
-      .center = center,
+      .center_packedAlpha = glm::vec4(center, alpha),
       .rotation = rotation,
-      .invScale2 = invScale2,
-      .alpha = alpha,
-      .materialIndex = (unsigned int)(baseMat + i),
-      .halfExtent = halfExtent
+      .invScale2_packedMat = glm::vec4(invScale2, std::bit_cast<float>(matIndex)),
     };
     splats[baseSplat + i] = gs;
 

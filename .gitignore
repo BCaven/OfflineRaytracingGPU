@@ -5,7 +5,6 @@
 
 tmp/
 enc_temp_folder/
-OfflineRaytracingGPU/external/tinyexr
 compile_commands.json
 # User-specific files
 *.rsuser
