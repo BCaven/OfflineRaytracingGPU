@@ -152,15 +152,15 @@ PackedRef suzannes_cube_instancesNxNxN(VK_Wrap& wrapper, int n)
 
     wrapper.materials = std::vector<Material>{
         Material{ pastel_orange, 0 },               // 0
-        Material{ pastel_blue, 0.5, 0, pastel_blue * 10.f },                // 2
-        Material{ pastel_purple, 0, 0, pastel_purple * 10.f },  // 3
-        Material{ pastel_green, -1.8, 25, pastel_green * 10.f },                // 1
-        Material{ green, 0, 0, green * 10.f },                      // 8
-        Material{ pastel_purple, 0, 0, light_purple },  // 4
-        Material{ pastel_orange, 0, 0, pastel_orange * 10.f },              // 5
-        Material{ pastel_grey, 0, 0, light_white },                     // 6
-        Material{ red, 0, 0, red * 10.f },                          // 7
-        Material{ white, 0, 0, white * 10.f }                       // 9
+        Material{ pastel_blue, 0.5, 0,0, pastel_blue * 10.f },                // 2
+        Material{ pastel_purple, 0, 0, 0,pastel_purple * 10.f },  // 3
+        Material{ pastel_green, -1.8, 0, 25, pastel_green * 10.f },                // 1
+        Material{ green, 0, 0,0, green * 10.f },                      // 8
+        Material{ pastel_purple, 0, 0,0, light_purple },  // 4
+        Material{ pastel_orange, 0, 0,0, pastel_orange * 10.f },              // 5
+        Material{ pastel_grey, 0, 0,0, light_white },                     // 6
+        Material{ red, 0, 0,0, red * 10.f },                          // 7
+        Material{ white, 0, 0,0, white * 10.f }                       // 9
     };
 
     for (unsigned int i = 1; i < wrapper.materials.size(); i++)
@@ -241,15 +241,15 @@ PackedRef nested_collections(VK_Wrap& wrapper)
 
     wrapper.materials = std::vector<Material>{
             Material{ pastel_orange, 1 },                   // 0
-            Material{ pastel_green, -1.5, 50 },                 // 1
+            Material{ pastel_green, -1.5, 0, 50 },                 // 1
             Material{ pastel_blue, 0.5 },                   // 2
-            Material{ pastel_purple, 0, 0, pastel_blue },   // 3
-            Material{ pastel_purple, 0, 0, red },           // 4
-            Material{ white, 0, 0, light_white },           // 5
-            Material{ pastel_grey, -1.7, 30 },              // 6
+            Material{ pastel_purple, 0, 0,0,  pastel_blue },   // 3
+            Material{ pastel_purple, 0, 0,0, red },           // 4
+            Material{ white, 0, 0,0, light_white },           // 5
+            Material{ pastel_grey, -1.7, 0, 30 },              // 6
             Material{ red, 0 },                                 // 7
             Material{ green, 0 },                           // 8
-            Material{ white, 0, 0, light_white },           // 9
+            Material{ white, 0, 0, 0, light_white },           // 9
             Material{ white, 0 },                           // 10
             Material{                                       // 11
                 .color = white,
@@ -380,15 +380,15 @@ PackedRef large_splat_demo(VK_Wrap& wrapper)
     wrapper.materials = std::vector<Material>{
             Material{ pastel_orange, 1},                // 0
             Material{ pastel_blue, 0.5 },               // 2
-            Material{ pastel_purple, 0, 0, light_white},    // 3
-            Material{ pastel_green, -1.8, 25},              // 1
+            Material{ pastel_purple, 0, 0, 0, light_white},    // 3
+            Material{ pastel_green, -1.8,0, 25},              // 1
             Material{ green, 0},                        // 8
-            Material{ pastel_purple, 0, 0, light_purple},   // 4
+            Material{ pastel_purple, 0, 0,0, light_purple},   // 4
             Material{ pastel_orange, 0},                // 5
-            Material{ pastel_grey, 0, 0, light_white },                     // 6
+            Material{ pastel_grey, 0, 0, 0, light_white },                     // 6
             Material{ red, 0},                          // 7
             Material{ white, 0},                        // 9
-            Material{ white, 0, 0, light_white}             // 10
+            Material{ white, 0, 0,0, light_white}             // 10
     };
 
     // TODO: maybe split this into chunks to easy traversal cost
@@ -455,13 +455,13 @@ PackedRef prism_demo(VK_Wrap& wrapper)
             Material{ red, 0},                          // 0
             Material{ green, 0},                        // 1
             Material{ white, 0},                        // 2
-            Material{ white, 0, 0, light_white},        // 3
+            Material{ white, 0, 0, 0, light_white},        // 3
             Material{                                   // 4
                 .color = white,
                 .metallicOrIor = -1.8,
                 .abbe = 10,
             },
-            Material{ white, 0, 0, sky * 2.f},          // 5
+            Material{ white, 0, 0, 0, sky * 2.f},          // 5
             Material{ glm::vec4(0), 0}                  // 6
 
     };
@@ -530,15 +530,15 @@ PackedRef demo_video(VK_Wrap& wrapper)
 
     wrapper.materials = std::vector<Material>{
             Material{ pastel_orange, 1},                    // 0
-            Material{ pastel_green, -1.5, 50 },                 // 1
+            Material{ pastel_green, -1.5, 0, 50 },                 // 1
             Material{ pastel_blue, 0.5 },                   // 2
             Material{ pastel_purple, 0},    // 3
             Material{ pastel_purple, 0},            // 4
             Material{ white, 0},            // 5
-            Material{ pastel_grey, -1.7, 30 },              // 6
+            Material{ pastel_grey, -1.7, 0, 30 },              // 6
             Material{ red, 0},                              // 7
             Material{ green, 0},                            // 8
-            Material{ white, 0, 0, light_white},            // 9
+            Material{ white, 0, 0, 0, light_white},            // 9
             Material{ white, 0},                            // 10
             Material{                                       // 11
                 .color = white,
@@ -638,9 +638,9 @@ PackedRef fractal(VK_Wrap& wrapper)
     wrapper.materials = std::vector<Material>{
             Material{ pastel_orange, 0},                // 00
             Material{ sky, 0 },
-            Material{ sky, 0, 0, light_1 },
-            Material{ sky, 0, 0, light_2 },
-            Material{ pastel_blue, -1.2, 100 }
+            Material{ sky, 0, 0, 0, light_1 },
+            Material{ sky, 0, 0, 0, light_2 },
+            Material{ pastel_blue, -1.2, 0, 100 }
     };
     PackedRef suzanneInstance = wrapper.loadObj("assets/suzanne.obj", 0);
 
@@ -734,15 +734,15 @@ PackedRef threaded(VK_Wrap& wrapper)
 
     wrapper.materials = std::vector<Material>{
             Material{ pastel_orange, 1 },                   // 0
-            Material{ pastel_green, -1.5, 50 },                 // 1
+            Material{ pastel_green, -1.5, 0, 50 },                 // 1
             Material{ pastel_blue, 0.5 },                   // 2
-            Material{ pastel_grey, -1.7, 30 },              // 3
-            Material{ pastel_purple, 0, 0, light_purple },  // 4
+            Material{ pastel_grey, -1.7, 0, 30 },              // 3
+            Material{ pastel_purple, 0, 0, 0, light_purple },  // 4
             Material{ pastel_purple, 0 },                   // 5
-            Material{ white, -1.3, 80},                         // 6
+            Material{ white, -1.3, 0, 80},                         // 6
             Material{ red, 0 },                                 // 7
             Material{ green, 0 },                           // 8
-            Material{ white, 0, 0, light_white },           // 9
+            Material{ white, 0, 0, 0, light_white },           // 9
             Material{                                       // 10
                 .color = white,
                 .metallicOrIor = 0,
@@ -894,7 +894,26 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
             .direction = glm::vec3(0, 0, -1),
             .fov = 20
         };
-        break;
+      break;
+    case 6:
+      // TextureSplat
+      root = wrapper.loadCollection({
+          wrapper.loadTransform(
+              glm::vec3(0.25, 1.11, -0.02), glm::vec3(-47.77, 0, 0),
+              glm::vec3(1),
+                                wrapper.loadSplat("assets/texture_splat_gardenspheres.ply")),
+          wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0)
+      });
+      dir = glm::vec3(0.188, -0.3796, -0.901);
+      dir = glm::normalize(dir);
+      right = glm::normalize(glm::cross(dir, WORLD_UP));
+      cam = CameraWrapper{
+        .origin = glm::vec3(-2, 3.46, 8),
+        .direction = dir,
+        .right = right,
+        .fov = 20
+      };
+      break;
     default:
         root = wrapper.loadObj("assets/suzanne.obj", 0);
         cam = CameraWrapper{
@@ -988,7 +1007,7 @@ int render_main(int argc, char* argv[])
     wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
     wrapper.time = 0;
 
-    int choice = 11;
+    int choice = 12;
     auto start = std::chrono::system_clock::now();
     PackedRef root = pickRoot(wrapper, choice, argc, argv);
 

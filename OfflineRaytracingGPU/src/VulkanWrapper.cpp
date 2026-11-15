@@ -2683,9 +2683,13 @@ Collection VK_Wrap::loadSplatCollection(std::string filepath)
   return prims;
 }
 
-std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
-{
-  bool pbr = false; // only difference for pbr vs non-pbr is materials
+std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath) {
+  enum PBR_Level {
+    NONE,
+    MATSPRAY,
+    TEXTURESPLAT
+  };
+  PBR_Level pbr = NONE; // only difference for pbr vs non-pbr is materials
   std::cout << "Loading " << filepath << "\n";
 
   std::ifstream file(filepath, std::ios::binary);
@@ -2751,27 +2755,73 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
   const plyDetail::Property& x = plyDetail::requireProperty(lookup, properties, "x");
   const plyDetail::Property& y = plyDetail::requireProperty(lookup, properties, "y");
   const plyDetail::Property& z = plyDetail::requireProperty(lookup, properties, "z");
-  const plyDetail::Property& dcR = plyDetail::requireProperty(lookup, properties, "f_dc_0");
-  const plyDetail::Property& dcG = plyDetail::requireProperty(lookup, properties, "f_dc_1");
-  const plyDetail::Property& dcB = plyDetail::requireProperty(lookup, properties, "f_dc_2");
   const plyDetail::Property& opacity = plyDetail::requireProperty(lookup, properties, "opacity");
   const plyDetail::Property& scale0 = plyDetail::requireProperty(lookup, properties, "scale_0");
   const plyDetail::Property& scale1 = plyDetail::requireProperty(lookup, properties, "scale_1");
-  const plyDetail::Property& scale2 = plyDetail::requireProperty(lookup, properties, "scale_2");
+  const plyDetail::Property * scale2 = nullptr; // texturesplat is 2d surfels... maybe this should just be a different loader
   const plyDetail::Property& rot0 = plyDetail::requireProperty(lookup, properties, "rot_0");
   const plyDetail::Property& rot1 = plyDetail::requireProperty(lookup, properties, "rot_1");
   const plyDetail::Property& rot2 = plyDetail::requireProperty(lookup, properties, "rot_2");
   const plyDetail::Property& rot3 = plyDetail::requireProperty(lookup, properties, "rot_3");
 
   // TODO: add checkProperty for the PBR fields
+  /**
+  Gaussian splat models created by TextureSplat
+  PLY fields            Meaning
+  metallic              One per-Gaussian metalness value.
+  roughness             One per-Gaussian roughness value.
+  albedo_0–albedo_2     One per-Gaussian RGB albedo.
+  ind_dc_*, ind_rest_*  Per-Gaussian SH coefficients for indirect/reflected light. At SH degree 3, that’s 48 floats total: 16 RGB coefficients.
+  ind_asg_*             32 anisotropic spherical-Gaussian lobes for directional indirect light, 5 parameters per lobe. Used when the renderer’s ASG option is enabled.
+
+  */
   const plyDetail::ValidProperty &base_color_0_check =
     plyDetail::checkProperty(lookup, properties, "base_color_0");
-  if (base_color_0_check.isValid) {
-    pbr = true;
-    // check the other attributes
-  }
+  const plyDetail::ValidProperty &texture_splat_check =
+    plyDetail::checkProperty(lookup, properties, "albedo_0");
+
+
+  // TODO: find out if these are always expected
+  const plyDetail::Property& dcR = plyDetail::requireProperty(lookup, properties, "f_dc_0");
+  const plyDetail::Property& dcG = plyDetail::requireProperty(lookup, properties, "f_dc_1");
+  const plyDetail::Property& dcB = plyDetail::requireProperty(lookup, properties, "f_dc_2");
+
+
 
   std::vector<const plyDetail::Property*> shRest;
+  std::size_t restCountPerChannel = 0;
+  // all of the properties, initilized to invalid :)
+  // TODO: find a better way to do this
+  const plyDetail::Property* ts_metallic = nullptr;
+  const plyDetail::Property* ts_roughness = nullptr;
+  const plyDetail::Property* ts_albedo_0 = nullptr;
+  const plyDetail::Property* ts_albedo_1 = nullptr;
+  const plyDetail::Property* ts_albedo_2 = nullptr;
+  if (base_color_0_check.isValid) {
+    // MATSPRAY!
+    pbr = MATSPRAY;
+    // check the other attributes
+  } else if (texture_splat_check.isValid) {
+    std::cout << "Using TextureSplat loader!\n";
+    pbr = TEXTURESPLAT;
+    // get all of the things
+    ts_metallic = &plyDetail::requireProperty(lookup, properties, "metallic");
+    ts_roughness = &plyDetail::requireProperty(lookup, properties, "roughness");
+    ts_albedo_0 = &plyDetail::requireProperty(lookup, properties, "albedo_0");
+    ts_albedo_1 = &plyDetail::requireProperty(lookup, properties, "albedo_1");
+    ts_albedo_2 = &plyDetail::requireProperty(lookup, properties, "albedo_2");
+    // TODO: SH
+    // TODO: ind_asg -> might not actually do this depending on the results
+
+  } else {
+    std::cout << "using normal 3dgs loader\n";
+
+    pbr = NONE;
+
+    scale2 = &plyDetail::requireProperty(lookup, properties, "scale_2");
+
+  }
+
   for (int i = 0; i < SH_REST_FLOAT_COUNT; ++i) {
     auto it = lookup.find("f_rest_" + std::to_string(i));
     if (it == lookup.end()) break;
@@ -2783,34 +2833,30 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
   if (shRest.size() % SH_CHANNEL_COUNT != 0) {
     throw std::runtime_error("PLY f_rest_* properties must contain the same count per RGB channel");
   }
-  const std::size_t restCountPerChannel = shRest.size() / SH_CHANNEL_COUNT;
+  restCountPerChannel = shRest.size() / SH_CHANNEL_COUNT;
   if (restCountPerChannel == 0) {
     throw std::runtime_error("Failed to parse - restCountPerChannel was zero!");
   }
 
-  // ---- single bulk read of all vertex data ----
+   // ---- single bulk read of all vertex data ----
   std::vector<unsigned char> blob(rowStride * vertexCount);
   file.read(reinterpret_cast<char*>(blob.data()), static_cast<std::streamsize>(blob.size()));
   if (!file) {
     throw std::runtime_error("PLY ended before all vertex records were read");
   }
 
-  // ---- pre-size outputs so each vertex owns a fixed, race-free slot ----
   const std::size_t baseShMat = shMats.size();
   const std::size_t baseMat = materials.size();
   const std::size_t baseSplat = splats.size();
-
   shMats.resize(baseShMat + vertexCount);
   materials.resize(baseMat + vertexCount);
   splats.resize(baseSplat + vertexCount);
   std::vector<KDopLeaf> leaves(vertexCount);
 
-  // per-vertex work, fully independent given the blob + pre-sized outputs
   auto processVertex = [&](std::size_t i) {
     const unsigned char* row = blob.data() + i * rowStride;
-    // small local adapter so plyDetail::readAsFloat's (row, property) signature still works
     auto readAsFloat = [&](const plyDetail::Property& p) {
-      return plyDetail::readAsFloatPtr(row, p); // see note below
+      return plyDetail::readAsFloatPtr(row, p);
       };
 
     glm::vec3 center(readAsFloat(x), readAsFloat(y), readAsFloat(z));
@@ -2828,15 +2874,44 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
       }
     }
 
+    float metallic = 0;
+    float roughness = 0;
+    glm::vec3 albedo = glm::vec3(0);
+    if (pbr == TEXTURESPLAT) {
+      /**
+         Color is based on:
+         - SH components (f_dc_*, f_rest_*)
+         - metallic
+         - roughness
+         - albedo -> specular tint for metals
+      */
+      // material_value = 1 / (1 + exp(-ply_value))
+      metallic = 1 / ( 1 + std::exp(-1 * readAsFloat(*ts_metallic)));
+      roughness = 1 / ( 1 + std::exp(-1 * readAsFloat(*ts_roughness)));
+      albedo[0] = 1 / ( 1 + std::exp(-1 * readAsFloat(*ts_albedo_0)));
+      albedo[1] = 1 / ( 1 + std::exp(-1 * readAsFloat(*ts_albedo_1)));
+      albedo[2] = 1 / ( 1 + std::exp(-1 * readAsFloat(*ts_albedo_2)));
+    } else if (pbr == NONE){
+
+
+    } else {
+      std::cerr << "Oh no! Tried to process a Gaussian splat .ply file with an unsupported type!\n";
+      // TODO: process this better :)
+    }
+
+    // none of the actual splat processing cares about the different types, they just change material attributes
     float raw_alpha = readAsFloat(opacity);
     float alpha = 1.0f / (1.0f + std::exp(-raw_alpha));
 
-    glm::vec3 scale(
-      std::exp(readAsFloat(scale0)),
-      std::exp(readAsFloat(scale1)),
-      std::exp(readAsFloat(scale2))
-    );
-    glm::vec3 invScale2(1.f / (scale.x * scale.x), 1.f / (scale.y * scale.y), 1.f / (scale.z * scale.z));
+    // TODO: either find a better way to support 2dgs -> 3dgs or just support 2dgs as a separate primitive
+    float surfelThickness = 0.001;
+    float sx = std::exp(readAsFloat(scale0));
+    float sy = std::exp(readAsFloat(scale1));
+    float sz = scale2 ? std::exp(readAsFloat(*scale2))
+                  : surfelThickness * std::min(sx, sy);
+
+    glm::vec3 scale(sx, sy, sz);
+    glm::vec3 invScale2(1.f / (sx * sx), 1.f / (sy * sy), 1.f / (sz * sz));
 
     glm::quat rotation(readAsFloat(rot0), readAsFloat(rot1), readAsFloat(rot2), readAsFloat(rot3));
     rotation = glm::normalize(rotation);
@@ -2844,36 +2919,46 @@ std::vector<KDopLeaf> VK_Wrap::loadSplat_helper(std::string filepath)
 
     float eps = 0.1f;
     float k = std::sqrt(-2.0f * std::log(eps));
-    glm::vec3 axis0 = k * scale.x * glm::vec3(R[0]);
-    glm::vec3 axis1 = k * scale.y * glm::vec3(R[1]);
-    glm::vec3 axis2 = k * scale.z * glm::vec3(R[2]);
+    glm::vec3 axis0 = k * sx * glm::vec3(R[0]);
+    glm::vec3 axis1 = k * sy * glm::vec3(R[1]);
+    glm::vec3 axis2 = k * sz * glm::vec3(R[2]);
     glm::vec3 halfExtent(
       std::abs(axis0.x) + std::abs(axis1.x) + std::abs(axis2.x),
       std::abs(axis0.y) + std::abs(axis1.y) + std::abs(axis2.y),
       std::abs(axis0.z) + std::abs(axis1.z) + std::abs(axis2.z)
     );
 
-
-    SphericalHarmonic shMat{ .degree = SH_REST_FLOAT_COUNT / (int)restCountPerChannel };
+    Material mat;
+    SphericalHarmonic shMat{.degree = SH_REST_FLOAT_COUNT /
+                                      (int)restCountPerChannel};
     for (int c = 0; c < SH_COUNT; c++) {
       int shIndex = c * SH_CHANNEL_COUNT;
       shMat.sh[c] = glm::vec3(sphericalHarmonics[shIndex], sphericalHarmonics[shIndex + 1], sphericalHarmonics[shIndex + 2]);
     }
     shMats[baseShMat + i] = shMat;
 
-    // normal gaussians
-    Material mat{
-      .color = glm::vec4(0),
-      .metallicOrIor = 0,
-      .emissiveColor = glm::vec4(0),
-      .SHIndex = static_cast<int>(baseShMat + i)
-    };
-    if (pbr)
-      {
-        mat = Material{
 
-        };
-      }
+    if (pbr == NONE) {
+            mat = Material{
+        .color = glm::vec4(0),
+        .metallicOrIor = 0,
+        .emissiveColor = glm::vec4(0),
+        .SHIndex = static_cast<int>(baseShMat + i)
+      };
+
+    } else if (pbr == TEXTURESPLAT) {
+      // roughness, metallic, albedo
+      // TODO: custom lighting SH later :)
+      // TODO: check what Material.color does with the fourth attribute
+      //std::cout << "Roughness: " << roughness << " metallic: " << metallic << "\n";
+
+      mat = Material {
+        .color = glm::vec4(0), .metallicOrIor = metallic,
+        .roughness = roughness, .SHIndex = static_cast<int>(baseShMat + i),
+        .albedo = glm::vec4(albedo, 1)
+      };
+    }
+
     unsigned int matIndex = baseMat + i;
     materials[matIndex] = mat;
 

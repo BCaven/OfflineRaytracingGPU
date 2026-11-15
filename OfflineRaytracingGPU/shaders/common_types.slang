@@ -6,6 +6,7 @@ public static const uint INDEX_MAX = 0x0FFFFFFFu;
 public static const float FLT_MAX = 3.40282346638528859812e+38;
 public static const float EPSILON = 1e-4;
 public static const float TWO_PI = 6.2831853;
+public static const float PI = 3.1415926535;
 public static const float4 GLASS_F0 = float4(0.04);
 public static const float GLASS_F0_SCALAR = 0.04;
 
@@ -76,13 +77,19 @@ public struct Intersection
 };
 
 // Materials
+// TODO: new type of materials that support roughness/metallic and use SH as
+// their base color (instead of color)
+// Could just say if SHIndex is present, use that instead of color?
+// since metallic=0 is still just 100% diffuse
 public struct Material
 {
     float4 color;
     float metallicOrIor;
+    float roughness;
     float abbe;
     float4 emissiveColor;
     int SHIndex = -1;
+    float4 albedo; // this is NOT color - its specular tint for metals... ugh
 };
 
 // Primitives

@@ -263,11 +263,40 @@ float cauchy_ior(float n_d, float abbeNumber, float lambda_nm)
     return A + B * invSqL;
 }
 
+// TODO: confirm these helper functions
+void build_basis(float3 n, out float3 t, out float3 b) {
+    // https://jcgt.org/published/0006/01/01/
+    float s = n.z >= 0 ? 1.f : -1.f;
+    float a = -1.f / (s + n.z);
+    float bb = n.x * n.y * a;
+    t = float3(1 + s * n.x * n.x * a, s * bb, -s * n.x);
+    b = float3(bb, s + n.y * n.y * a, -n.y);
+}
+float smith_lambda_ggx(float cosT, float a2)
+{
+    float c2 = max(cosT * cosT, 1e-8f);
+    return 0.5f * (sqrt(1.0f + a2 * (1.0f - c2) / c2) - 1.0f);
+}
+
+// Heitz 2018, isotropic. Ve is in the local frame (z = normal).
+float3 sample_ggx_vndf(float3 Ve, float alpha, float2 u)
+{
+    float3 Vh = normalize(float3(alpha * Ve.x, alpha * Ve.y, Ve.z));
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    float3 T1 = lensq > 0 ? float3(-Vh.y, Vh.x, 0) * rsqrt(lensq) : float3(1, 0, 0);
+    float3 T2 = cross(Vh, T1);
+    float r = sqrt(u.x);
+    float phi = 2.0f * PI * u.y;
+    float t1 = r * cos(phi);
+    float t2 = r * sin(phi);
+    float s = 0.5f * (1.0f + Vh.z);
+    t2 = (1.0f - s) * sqrt(1.0f - t1 * t1) + s * t2;
+    float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
+    return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0f, Nh.z)));
+}
+
 public float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir, int frameIndex)
 {
-    // TODO: this function needs to push rays to writeQueue
-    // probably easiest to return scatter and emission spectral so they can be used, since the input ray is dead
-
     // TODO: microfacet BRDF
     // get wavelength from ray
 
@@ -331,8 +360,12 @@ public float2 scatter_spectral(Ray input_ray, Intersection hit, Material materia
         result = max(result, 0.f);
         attenuation = float4(result, 1);
     }
+
+    // TODO: support Roughness
+
     float spectral_albedo = rgb_to_spectral(attenuation, lambda);
     float attenuation_scalar = spectral_albedo;
+    float3 scattered;
     if (is_transmissive)
     {
 
@@ -343,10 +376,16 @@ public float2 scatter_spectral(Ray input_ray, Intersection hit, Material materia
         choose_specular = cannot_refract || schlick_fresnel(f0, u5) > rand_float();
         attenuation_scalar = choose_specular ? 1.f : spectral_albedo;
     }
-    else if (material.metallicOrIor > 0 && !useSH)
+    else if (material.metallicOrIor > 0)
     {
         float metallic = material.metallicOrIor;
-        float f0 = lerp(GLASS_F0_SCALAR, spectral_albedo, metallic);
+        float alpha = max(material.roughness * material.roughness, EPSILON);
+        float a2 = alpha * alpha;
+        float tint = any(material.albedo.xyz > 0.0f)
+            ? rgb_to_spectral(material.albedo, lambda)
+            : spectral_albedo;
+
+        float f0 = lerp(GLASS_F0_SCALAR, tint, metallic);
         float F = schlick_fresnel(f0, u5);
 
         float specular = F;
@@ -369,7 +408,6 @@ public float2 scatter_spectral(Ray input_ray, Intersection hit, Material materia
     }
 
 
-    float3 scattered = float3(0);
     if (choose_specular)
     {
         scattered = reflect(incident, N);

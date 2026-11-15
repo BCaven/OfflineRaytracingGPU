@@ -179,9 +179,11 @@ struct Material
 {
   glm::vec4 color;
   float metallicOrIor;
+  float roughness = 0;
   float abbe = 1;
   glm::vec4 emissiveColor = glm::vec4(0);
   int SHIndex = -1;
+  glm::vec4 albedo;
 };
 
 struct GaussianSplat
