@@ -297,9 +297,6 @@ float3 sample_ggx_vndf(float3 Ve, float alpha, float2 u)
 
 public float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir, int frameIndex)
 {
-    // TODO: microfacet BRDF
-    // get wavelength from ray
-
     float3 incident = normalize(input_ray.direction);
     float incident_dot_normal = dot(incident, hit.normal);
     bool is_front_face = incident_dot_normal < 0;
@@ -361,7 +358,7 @@ public float2 scatter_spectral(Ray input_ray, Intersection hit, Material materia
         attenuation = float4(result, 1);
     }
 
-    // TODO: support Roughness
+    // TODO: support Roughness (AND STILL PRESERVE ENERGY)
 
     float spectral_albedo = rgb_to_spectral(attenuation, lambda);
     float attenuation_scalar = spectral_albedo;

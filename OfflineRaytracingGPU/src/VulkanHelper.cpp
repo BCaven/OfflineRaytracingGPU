@@ -832,8 +832,8 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
     glm::vec4 sky = 10.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
     wrapper.materials = std::vector<Material>{
-            Material{ pastel_orange, 0 },                   // 0
-
+      Material{pastel_orange, 0},
+      Material{.color = light_purple, .emissiveColor = light_purple}
     };
 
   CameraWrapper cam;
@@ -901,8 +901,9 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
           wrapper.loadTransform(
               glm::vec3(0.25, 1.11, -0.02), glm::vec3(-47.77, 0, 0),
               glm::vec3(1),
-                                wrapper.loadSplat("assets/texture_splat_gardenspheres.ply")),
-          wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0)
+              wrapper.loadSplat("assets/texture_splat_gardenspheres.ply")),
+          wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0),
+          wrapper.loadTransform(glm::vec3(0, 4, 4), glm::vec3(0), glm::vec3(1), wrapper.loadObj("assets/beholder.obj", 1))
       });
       dir = glm::vec3(0.188, -0.3796, -0.901);
       dir = glm::normalize(dir);
@@ -913,6 +914,36 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
         .right = right,
         .fov = 20
       };
+      break;
+    case 7:
+      // TODO: GLINT
+      root = wrapper.loadCollection({
+          wrapper.loadTransform(
+              glm::vec3(0.25, 1.11, -0.02), glm::vec3(-47.77, 0, 0),
+              glm::vec3(1),
+              wrapper.loadSplat("assets/texture_splat_gardenspheres.ply")),
+          wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0),
+          wrapper.loadTransform(glm::vec3(0, 4, 4), glm::vec3(0), glm::vec3(1), wrapper.loadObj("assets/beholder.obj", 1))
+      });
+      dir = glm::vec3(0.188, -0.3796, -0.901);
+      dir = glm::normalize(dir);
+      right = glm::normalize(glm::cross(dir, WORLD_UP));
+      cam = CameraWrapper{
+        .origin = glm::vec3(-2, 3.46, 8),
+        .direction = dir,
+        .right = right,
+        .fov = 20
+      };
+      break;
+    case 8:
+      // TODO: SPONZA
+      root = wrapper.loadObj("assets/sponza.obj", 0);
+      break;
+    case 9:
+      // TODO: Bistro
+      break;
+    case 10:
+      // TODO: Temple
       break;
     default:
         root = wrapper.loadObj("assets/suzanne.obj", 0);

@@ -11,6 +11,8 @@ Interactive progressive spectral Monte Carlo GPU path tracer written in Slang an
 
 This path tracer uses a compute-shader pipeline with custom BVH traversal algorithms. It does not use hardware RT.
 
+This path tracer is cross platform! It has been tested on Windows 10 and Ubuntu 26.04.1 LTS.
+
 # Controls
 
 This path tracer is interactive. \
@@ -54,6 +56,8 @@ This section does not cover every aspect of the engine. (e.g., triangle and sphe
 > More on [methodology](#methodology) below.
 
 ## Current Performance
+
+<!-- TODO: performance when validation layers are disabled and build is set to release -->
 
 As the path tracer gets optimized, the numbers in experiments below become outdated. \
 Experiments are marked with which release they are from. \
@@ -253,6 +257,8 @@ This results in better overall performance than either method alone, and scenes 
 
 ## Methodology:
 
+Reported numbers are from the debug build on Windows 10 unless otherwise stated.
+
 This path tracer computes a single ray over the course of 10 frames. \
 Each frame computes a single bounce then records the new state of that ray in a buffer, which is read by the next frame.
 
@@ -261,7 +267,6 @@ When the maximum number of bounces has been reached (default is 10) a new primar
 To fairly compare each traversal algorithm, reported timings are the average frame time across the entire 10 frame sequence. Measurements are repeated randomly in the program's lifetime until they converge (minimum of 3 times) to ensure the reported timings are accurate. \
 Total frame time for all 10 frames in the sequence is recored using Nsight and the average time per frame is computed. \
 Each scene was measured in an identical configuration across each traversal algorithm.
-
 
 # Building and contributing
 
