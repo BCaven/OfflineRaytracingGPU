@@ -899,11 +899,11 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
       // TextureSplat
       root = wrapper.loadCollection({
           wrapper.loadTransform(
-              glm::vec3(0.25, 1.11, -0.02), glm::vec3(-47.77, 0, 0),
+              glm::vec3(0.25, 1.11, -0.02), glm::vec3(310, 0, 0),
               glm::vec3(1),
               wrapper.loadSplat("assets/texture_splat_gardenspheres.ply")),
           wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0),
-          wrapper.loadTransform(glm::vec3(0, 4, 4), glm::vec3(0), glm::vec3(1), wrapper.loadObj("assets/beholder.obj", 1))
+          //wrapper.loadTransform(glm::vec3(0, 4, 4), glm::vec3(0), glm::vec3(1), wrapper.loadObj("assets/beholder.obj", 1))
       });
       dir = glm::vec3(0.188, -0.3796, -0.901);
       dir = glm::normalize(dir);
@@ -919,11 +919,11 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
       // TODO: GLINT
       root = wrapper.loadCollection({
           wrapper.loadTransform(
-              glm::vec3(0.25, 1.11, -0.02), glm::vec3(-47.77, 0, 0),
+              glm::vec3(0.25, 1.11, -0.02), glm::vec3(-48.56, 0, 0),
               glm::vec3(1),
               wrapper.loadSplat("assets/texture_splat_gardenspheres.ply")),
           wrapper.loadObj("assets/suzanne_4subdivisions.obj", 0),
-          wrapper.loadTransform(glm::vec3(0, 4, 4), glm::vec3(0), glm::vec3(1), wrapper.loadObj("assets/beholder.obj", 1))
+         // wrapper.loadTransform(glm::vec3(0, 4, 4), glm::vec3(0), glm::vec3(1), wrapper.loadObj("assets/beholder.obj", 1))
       });
       dir = glm::vec3(0.188, -0.3796, -0.901);
       dir = glm::normalize(dir);
@@ -960,6 +960,88 @@ PackedRef perf_benchmarking(VK_Wrap& wrapper)
 
 
     return root;
+}
+
+PackedRef textureSplatDemo(VK_Wrap& wrapper)
+{
+    wrapper.bThreaded = false;
+    std::string prefix = "renderedFrames/gardenSpheres_";
+    wrapper.savePath = prefix + std::to_string(wrapper.time) + ".exr";
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> rand(0, 10);
+
+    glm::vec4 pastel_orange = glm::vec4(252, 187, 67, 255) / 255.0f;
+    glm::vec4 pastel_green = glm::vec4(143, 237, 82, 255) / 255.0f;
+    glm::vec4 pastel_blue = glm::vec4(83, 236, 228, 255) / 255.0f;
+    glm::vec4 pastel_purple = glm::vec4(181, 150, 243, 255) / 255.0f;
+    glm::vec4 pastel_grey = glm::vec4(139, 157, 180, 255) / 255.f;
+    glm::vec4 red = glm::vec4(1, 0, 0, 1);
+    glm::vec4 green = glm::vec4(0, 1, 0, 1);
+    glm::vec4 white = glm::vec4(1);
+
+    glm::vec4 light_white = glm::vec4(1);
+    glm::vec4 light_purple =  2.f * glm::vec4(128, 0, 255, 255) / 255.f;
+    glm::vec4 sky = (glm::vec4(4, 4, 4, 255) / 255.f);
+
+    wrapper.materials = std::vector<Material>{
+            Material{ pastel_orange, 1 },                   // 0
+            Material{ pastel_green, -1.5, 0, 50 },                 // 1
+            Material{ pastel_blue, 0.5 },                   // 2
+            Material{ pastel_grey, -1.7, 0, 30 },              // 3
+            Material{ pastel_purple, 0, 0, 0, light_purple },  // 4
+            Material{ pastel_purple, 0 },                   // 5
+            Material{ white, -1.3, 0, 80 },                         // 6
+            Material{ red, 0 },                                 // 7
+            Material{ green, 0 },                           // 8
+            Material{ white, 0, 0, 0, light_white },           // 9
+            Material{                                       // 10
+                .color = white,
+                .metallicOrIor = 0,
+                .abbe = 0,
+            }
+    };
+
+    Collection scene;
+
+
+    float radius = 1.3;
+    glm::vec3 offset(-0.3, 0, 0); //radius / 2;
+    unsigned int matIndex = 0;
+    for (float r = 0; r < PI * 2; r += PI / 8)
+    {
+        scene.push_back(packChild(SPHERE, wrapper.spheres.size()));
+        wrapper.spheres.push_back(
+            Sphere{ offset + glm::vec3((std::sin(r) * radius), 0.2, (std::cos(r) * radius)), 0.1, matIndex }
+        );
+
+        matIndex++;
+        matIndex = matIndex % 8;
+    }
+    scene.push_back(packChild(SPHERE, wrapper.spheres.size()));
+    wrapper.spheres.push_back(
+        Sphere{ glm::vec3(0, 3, 0), 0.5, 9 }
+    );
+
+    auto gardenSpheres = wrapper.loadTransform(
+        glm::vec3(0.2, 3.13, -0.43), glm::vec3(2.282018, 0, 0.008726646),
+        glm::vec3(1),
+        wrapper.loadSplat("assets/texture_splat_gardenspheres.ply"));
+
+    scene.push_back(gardenSpheres);
+
+    auto beholder_mat = wrapper.loadObj("assets/beholder.obj", 7);
+
+    scene.push_back(wrapper.loadTransform(
+        glm::vec3(1, 0.7, 0), 
+        glm::vec3(0), 
+        glm::vec3(0.1), 
+        beholder_mat));
+
+    wrapper.shaderData.backgroundColor = sky;
+
+    return wrapper.loadCollection(scene);
 }
 
 PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool resetCamera = true)
@@ -1014,6 +1096,9 @@ PackedRef pickRoot(VK_Wrap& wrapper, int choice, int argc, char** argv, bool res
     case 12:
         root = perf_benchmarking(wrapper);
         break;
+    case 13:
+        root = textureSplatDemo(wrapper);
+        break;
     default:
         root = suzannes_row_instancesNxN(wrapper, 100);
         break;
@@ -1038,7 +1123,7 @@ int render_main(int argc, char* argv[])
     wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
     wrapper.time = 0;
 
-    int choice = 12;
+    int choice = 13;
     auto start = std::chrono::system_clock::now();
     PackedRef root = pickRoot(wrapper, choice, argc, argv);
 

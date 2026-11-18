@@ -1,5 +1,7 @@
 # Offline GPU Path Tracer
 
+![rough/metallic Gaussian splat primitives](ProjectAssets/gardenSpheres.png)
+
 ![threaded BLAS stack TLAS showcase](ProjectAssets/mixed_traversal_showcase.png)
 
 Interactive progressive spectral Monte Carlo GPU path tracer written in Slang and C++ using Vulkan.
@@ -190,6 +192,17 @@ As papers come out with better materials, support will be added for those as wel
 
 These are based on the paper [MatSpray](https://matspray.jdihlmann.com/). \
 I am working on a [fork](https://github.com/BCaven/MatSpray) of MatSpray that can support larger scenes while using less VRAM.
+
+#### TextureSplat Gaussian splats
+
+These are based on the paper [TextureSplat](https://github.com/maeyounes/TextureSplat). \
+The splats support per-primitive roughness and metallic properties.
+
+Here is an example:
+
+![rough/metallic Gaussian splat primitives](ProjectAssets/gardenSpheres.png)
+
+I have found the model works well in some scenes but fails in others that have glass or COLMAP datasets with consistent reflections that are otherwise indistinguishable from real objects.
 
 ## Time and Animations
 

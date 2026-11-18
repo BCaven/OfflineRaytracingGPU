@@ -264,6 +264,7 @@ float cauchy_ior(float n_d, float abbeNumber, float lambda_nm)
 }
 
 // TODO: confirm these helper functions
+// No seriously
 void build_basis(float3 n, out float3 t, out float3 b) {
     // https://jcgt.org/published/0006/01/01/
     float s = n.z >= 0 ? 1.f : -1.f;
@@ -293,6 +294,34 @@ float3 sample_ggx_vndf(float3 Ve, float alpha, float2 u)
     t2 = (1.0f - s) * sqrt(1.0f - t1 * t1) + s * t2;
     float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
     return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(0.0f, Nh.z)));
+}
+
+static const float COAT_FDR_INT = 0.596f; // internal diffuse reflectance, ior 1.5
+static const int MAX_VNDF_TRIES = 16;
+
+// Samples a visible microfacet normal and reflects about it. If the reflection
+// goes below the horizon or is masked, it samples again instead of absorbing.
+// h and l default to the smooth-surface mirror result if every try fails.
+void sample_rough_reflection(float3 v, float alpha, out float3 h, out float3 l)
+{
+    float a2 = alpha * alpha;
+    float lam_o = smith_lambda_ggx(v.z, a2);
+    h = float3(0, 0, 1);
+    l = float3(-v.x, -v.y, v.z);
+
+    for (int i = 0; i < MAX_VNDF_TRIES; i++)
+    {
+        float3 m = sample_ggx_vndf(v, alpha, float2(rand_float(), rand_float()));
+        float3 r = reflect(-v, m);
+        if (r.z <= 0.0f) continue; // went below the surface
+        float lam_i = smith_lambda_ggx(r.z, a2);
+        if (rand_float() < (1.0f + lam_o) / (1.0f + lam_o + lam_i)) // G2 / G1
+        {
+            h = m;
+            l = r;
+            return;
+        }
+    }
 }
 
 public float2 scatter_spectral(Ray input_ray, Intersection hit, Material material, float3 camDir, int frameIndex)
@@ -360,70 +389,77 @@ public float2 scatter_spectral(Ray input_ray, Intersection hit, Material materia
 
     // TODO: support Roughness (AND STILL PRESERVE ENERGY)
 
-    float spectral_albedo = rgb_to_spectral(attenuation, lambda);
+    float spectral_albedo = saturate(rgb_to_spectral(attenuation, lambda)); // diffuse base, kept in [0,1]
     float attenuation_scalar = spectral_albedo;
     float3 scattered;
+
     if (is_transmissive)
     {
-
         float ior = cauchy_ior(abs(material.metallicOrIor), material.abbe, lambda);
         ref_ratio = select(is_front_face, 1 / ior, ior);
         bool cannot_refract = ref_ratio * ref_ratio * (1.0 - cos_theta * cos_theta) > 1;
         float f0 = schlick_f0_from_ior(ref_ratio);
         choose_specular = cannot_refract || schlick_fresnel(f0, u5) > rand_float();
         attenuation_scalar = choose_specular ? 1.f : spectral_albedo;
-    }
-    else if (material.metallicOrIor > 0)
-    {
-        float metallic = material.metallicOrIor;
-        float alpha = max(material.roughness * material.roughness, EPSILON);
-        float a2 = alpha * alpha;
-        float tint = any(material.albedo.xyz > 0.0f)
-            ? rgb_to_spectral(material.albedo, lambda)
-            : spectral_albedo;
-
-        float f0 = lerp(GLASS_F0_SCALAR, tint, metallic);
-        float F = schlick_fresnel(f0, u5);
-
-        float specular = F;
-        float diffuse = (spectral_albedo - GLASS_F0_SCALAR) * (1 - metallic) * (1 - u5) / 0.5;
-
-        float S = specular;
-        float D = diffuse;
-        float specular_pdf = S / (S + D);
-
-        choose_specular = specular_pdf > rand_float();
 
         if (choose_specular)
-        {
-            attenuation_scalar = specular / specular_pdf;
-        }
-        else
-        {
-            attenuation_scalar = diffuse / (1 - specular_pdf);
-        }
-    }
-
-
-    if (choose_specular)
-    {
-        scattered = reflect(incident, N);
-    }
-    else if (is_transmissive)
-    {
-        float3 refracted = refract(incident, N, ref_ratio);
-        if (length(refracted) < EPSILON)
         {
             scattered = reflect(incident, N);
         }
         else
         {
-            scattered = refracted;
+            float3 refracted = refract(incident, N, ref_ratio);
+            scattered = (length(refracted) < EPSILON) ? reflect(incident, N) : refracted;
+        }
+    }
+    else if (material.metallicOrIor > 0)
+    {
+        float metallic = saturate(material.metallicOrIor);
+        float alpha = max(material.roughness * material.roughness, 1e-3f);
+        float tint = saturate(any(material.albedo.xyz > 0.0f)
+            ? rgb_to_spectral(material.albedo, lambda)
+            : spectral_albedo);
+
+        // local frame, v points away from the surface
+        float3 T, B;
+        build_basis(N, T, B);
+        float3 wo = -incident;
+        float3 v = normalize(float3(dot(wo, T), dot(wo, B), max(dot(wo, N), 1e-4f)));
+
+        float3 h, l;
+        sample_rough_reflection(v, alpha, h, l);
+        float3 spec_dir = normalize(T * l.x + B * l.y + N * l.z);
+
+        float uh = 1.0f - saturate(dot(v, h)); // Fresnel uses V.H, not N.V
+        float uh5 = uh * uh * uh * uh * uh;
+
+        if (rand_float() < metallic)
+        {
+            // conductor: all light reflects, tinted by Fresnel
+            scattered = spec_dir;
+            attenuation_scalar = schlick_fresnel(tint, uh5);
+        }
+        else
+        {
+            // dielectric coat over a diffuse base
+            float F = schlick_fresnel(GLASS_F0_SCALAR, uh5);
+            if (rand_float() < F)
+            {
+                scattered = spec_dir; // coat reflection, uncolored
+                attenuation_scalar = 1.0f;
+            }
+            else
+            {
+                // light enters, hits the base, may bounce inside the coat before exiting
+                scattered = sample_lamberian(N);
+                attenuation_scalar = spectral_albedo * (1.0f - COAT_FDR_INT)
+                                   / (1.0f - spectral_albedo * COAT_FDR_INT);
+            }
         }
     }
     else
     {
-        scattered = sample_lamberian(N);
+        scattered = sample_lamberian(N); // plain 3DGS splats, unchanged
     }
 
     Ray outputRay;
