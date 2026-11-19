@@ -981,9 +981,9 @@ PackedRef textureSplatDemo(VK_Wrap& wrapper)
     glm::vec4 green = glm::vec4(0, 1, 0, 1);
     glm::vec4 white = glm::vec4(1);
 
-    glm::vec4 light_white = glm::vec4(1);
+    glm::vec4 light_white = 2.f * glm::vec4(1);
     glm::vec4 light_purple =  2.f * glm::vec4(128, 0, 255, 255) / 255.f;
-    glm::vec4 sky = (glm::vec4(4, 4, 4, 255) / 255.f);
+    glm::vec4 sky = 2.f * (glm::vec4(4, 4, 4, 255) / 255.f);
 
     wrapper.materials = std::vector<Material>{
             Material{ pastel_orange, 1 },                   // 0
@@ -1009,7 +1009,7 @@ PackedRef textureSplatDemo(VK_Wrap& wrapper)
     float radius = 1.3;
     glm::vec3 offset(-0.3, 0, 0); //radius / 2;
     unsigned int matIndex = 0;
-    for (float r = 0; r < PI * 2; r += PI / 8)
+    for (float r = wrapper.time; r < (PI * 2) + wrapper.time; r += PI / 8)
     {
         scene.push_back(packChild(SPHERE, wrapper.spheres.size()));
         wrapper.spheres.push_back(
@@ -1021,7 +1021,7 @@ PackedRef textureSplatDemo(VK_Wrap& wrapper)
     }
     scene.push_back(packChild(SPHERE, wrapper.spheres.size()));
     wrapper.spheres.push_back(
-        Sphere{ glm::vec3(0, 3, 0), 0.5, 9 }
+        Sphere{ glm::vec3(-1, 3, 0), 0.5, 9 }
     );
 
     auto gardenSpheres = wrapper.loadTransform(
@@ -1117,9 +1117,9 @@ int render_main(int argc, char* argv[])
     VK_Wrap wrapper;
     wrapper.savePath = "renderedFrames/default.exr";
 
-    wrapper.numFramesPerFile = 200;
-    wrapper.numImagesPerSequence = 1;
-    float end_time = 29;
+    wrapper.numFramesPerFile = 3000;
+    wrapper.numImagesPerSequence = 64;
+    float end_time = PI;
     wrapper.time_delta =  end_time / wrapper.numImagesPerSequence;
     wrapper.time = 0;
 

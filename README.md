@@ -1,6 +1,6 @@
 # Offline GPU Path Tracer
 
-![rough/metallic Gaussian splat primitives](ProjectAssets/gardenSpheres.png)
+![rough/metallic Gaussian splat primitives](ProjectAssets/gardenSpheres_2k_samples.gif)
 
 ![threaded BLAS stack TLAS showcase](ProjectAssets/mixed_traversal_showcase.png)
 

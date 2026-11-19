@@ -2493,7 +2493,17 @@ PackedRef VK_Wrap::loadObj(std::string filepath, unsigned int materialIndex)
   std::vector<tinyobj::shape_t> shapes;
   std::vector<tinyobj::material_t> materials;
   chk(tinyobj::LoadObj(&attrib, &shapes, &materials, nullptr, nullptr, filepath.c_str()));
+
+  std::cout << "File read, processing verts\n";
+
+
+  // TODO: process all shapes in an OBJ file
+  // TODO: process all textures in an OBJ file
+
+
+
   std::vector<Vertex> vertices{};
+  vertices.reserve(shapes[0].mesh.indices.size());
   // Load vertex and index data
   for (auto& index : shapes[0].mesh.indices) {
     Vertex v{
